@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ATT&amp;CK Data Source Inventory</title>
   <link rel="stylesheet" href="css/styles.css" />
-  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js" defer></script>
+  <script src="vendor/js-yaml.min.js" defer></script>
+  <script src="vendor/mermaid.min.js" defer></script>
   <script type="module" src="js/app.js" defer></script>
 </head>
 <body>
@@ -23,21 +23,24 @@
   <nav class="tabs" role="tablist">
     <button class="tab active" data-tab="setup" role="tab">1. MITRE CTI</button>
     <button class="tab" data-tab="inventory" role="tab">2. Log Inventory</button>
-    <button class="tab" data-tab="coverage" role="tab">3. Detections</button>
-    <button class="tab" data-tab="threats" role="tab">4. Threats</button>
-    <button class="tab" data-tab="gaps" role="tab">5. Gap Analysis</button>
+    <button class="tab" data-tab="components" role="tab">3. Data Components</button>
+    <button class="tab" data-tab="coverage" role="tab">4. Detection Strategies</button>
+    <button class="tab" data-tab="threats" role="tab">5. Threats</button>
+    <button class="tab" data-tab="gaps" role="tab">6. Coverage vs Threats</button>
     <button class="tab" data-tab="graph" role="tab">Diagrams</button>
     <button class="tab" data-tab="export" role="tab">Export</button>
   </nav>
   <select class="tabs-mobile" id="tabsMobile" aria-label="Section">
     <option value="setup">1. MITRE CTI</option>
     <option value="inventory">2. Log Inventory</option>
-    <option value="coverage">3. Detections</option>
-    <option value="threats">4. Threats</option>
-    <option value="gaps">5. Gap Analysis</option>
+    <option value="components">3. Data Components</option>
+    <option value="coverage">4. Detection Strategies</option>
+    <option value="threats">5. Threats</option>
+    <option value="gaps">6. Coverage vs Threats</option>
     <option value="graph">Diagrams</option>
     <option value="export">Export</option>
   </select>
+  <div id="globalBanner" class="global-banner" hidden></div>
 
   <main>
     <section class="panel active" id="tab-setup" role="tabpanel">
@@ -97,13 +100,33 @@
         </span>
         <button id="exportInventoryYaml">Export YAML</button>
         <button id="exportInventoryJson">Export JSON</button>
+      </div>
+      <div id="inventorySummary" class="inv-summary"></div>
+      <div class="row">
+        <label class="checkbox-row"><input type="checkbox" id="onlyScored" /> Show only scored data sources</label>
         <button id="resetInventoryBtn" class="danger">Reset</button>
       </div>
       <div id="inventoryTable" class="ds-list"></div>
     </section>
 
+    <section class="panel" id="tab-components" role="tabpanel">
+      <h2>3. Data Components</h2>
+      <p>Flat list of every ATT&amp;CK data component. The score on the right is what you set on the Log Inventory tab. Use this to spot collection gaps quickly.</p>
+      <div class="stats" id="componentStats"></div>
+      <div class="row">
+        <input type="search" id="componentFilter" placeholder="Filter components (name, source)…" />
+        <select id="componentScoreFilter">
+          <option value="">All scores</option>
+          <option value="0">Score 0 (uncovered)</option>
+          <option value="1">Score 1+ (covered)</option>
+          <option value="3">Score 3+ (good)</option>
+        </select>
+      </div>
+      <div id="componentTable" class="tech-list"></div>
+    </section>
+
     <section class="panel" id="tab-coverage" role="tabpanel">
-      <h2>3. Detections available</h2>
+      <h2>4. Detection strategies</h2>
       <p>Techniques you can detect, derived from the data components your inventory covers. Score = max source quality &times; covered/total component ratio.</p>
       <div class="stats" id="coverageStats"></div>
       <div class="row">
@@ -124,7 +147,7 @@
     </section>
 
     <section class="panel" id="tab-threats" role="tabpanel">
-      <h2>4. Threats</h2>
+      <h2>5. Threats</h2>
       <p>Pick the MITRE ATT&amp;CK threat-actor groups (e.g. APT29, FIN7) you care about. The next tab compares their techniques against your detection coverage.</p>
       <div class="row">
         <input type="search" id="groupFilter" placeholder="Filter groups (name, alias, ID)&hellip;" />
@@ -146,8 +169,8 @@
     </section>
 
     <section class="panel" id="tab-gaps" role="tabpanel">
-      <h2>5. Gap analysis</h2>
-      <p>Cross-references the techniques used by the threat groups you picked against your detection coverage. Gaps are techniques those groups use that your data sources can't catch.</p>
+      <h2>6. Coverage vs threats</h2>
+      <p>Cross-references the techniques used by the threat groups you picked against your detection strategies. Gaps are techniques those groups use that your data sources can't catch.</p>
       <div class="stats" id="threatStats"></div>
       <div class="row">
         <select id="threatStatusFilter">

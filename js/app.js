@@ -21,6 +21,9 @@ const state = {
   filters: {
     ds: "",
     platform: "",
+    onlyScored: false,
+    component: "",
+    componentScore: "",
     tech: "",
     tactic: "",
     coverage: "",
@@ -52,10 +55,40 @@ function setStatus(text, kind = "") {
 // no attack data loaded.
 function refreshAll() {
   renderInventory();
+  renderComponents();
   renderCoverage();
   renderGraph();
   renderExport();
   renderThreats();
+}
+
+// Show a sticky banner across the top — stays visible until the user
+// dismisses or the cause is resolved. Used for "library failed to load",
+// import errors that are easy to miss in the small status text, etc.
+function setBanner(message, kind = "error") {
+  const el = $("#globalBanner");
+  if (!el) return;
+  if (!message) { el.hidden = true; el.innerHTML = ""; return; }
+  el.hidden = false;
+  el.className = `global-banner ${kind}`;
+  el.innerHTML = `${message} <span style="margin-left:auto;cursor:pointer;font-weight:600" id="dismissBanner">×</span>`;
+  el.querySelector("#dismissBanner")?.addEventListener("click", () => { el.hidden = true; });
+}
+
+// Detect if the bundled libs are usable. Shows a banner if not.
+function checkVendorLibs() {
+  const issues = [];
+  if (typeof window.jsyaml === "undefined") issues.push("js-yaml");
+  if (typeof window.mermaid === "undefined") issues.push("mermaid");
+  if (issues.length) {
+    setBanner(
+      `Local libraries failed to load: ${issues.join(", ")}. ` +
+      `Imports / diagrams won't work. Reload the page; if it persists, check that <code>vendor/</code> ships with the deployment.`,
+      "error"
+    );
+    return false;
+  }
+  return true;
 }
 
 // Tabs
@@ -64,6 +97,7 @@ function activateTab(id) {
   $$(".panel").forEach(p => p.classList.toggle("active", p.id === `tab-${id}`));
   const sel = $("#tabsMobile");
   if (sel && sel.value !== id) sel.value = id;
+  if (id === "components") renderComponents();
   if (id === "coverage") renderCoverage();
   if (id === "graph") renderGraph();
   if (id === "export") renderExport();
@@ -155,6 +189,9 @@ function populateTacticFilter() {
 // --- Inventory tab ---
 $("#dsFilter").addEventListener("input", e => { state.filters.ds = e.target.value.toLowerCase(); renderInventory(); });
 $("#platformFilter").addEventListener("change", e => { state.filters.platform = e.target.value; renderInventory(); });
+$("#onlyScored")?.addEventListener("change", e => { state.filters.onlyScored = e.target.checked; renderInventory(); });
+$("#componentFilter")?.addEventListener("input", e => { state.filters.component = e.target.value.toLowerCase(); renderComponents(); });
+$("#componentScoreFilter")?.addEventListener("change", e => { state.filters.componentScore = e.target.value; renderComponents(); });
 $("#setAllBtn").addEventListener("click", () => {
   if (!state.attack) { setStatus("Load ATT&CK first", "error"); return; }
   const score = Number($("#setAllValue").value);
@@ -172,16 +209,25 @@ $("#inventoryFile").addEventListener("change", async ev => {
   if (!file) return;
   try {
     const text = await file.text();
-    if (typeof window.jsyaml === "undefined") throw new Error("YAML library not loaded yet — reload the page");
     const looksJson = /\.json$/i.test(file.name) || /^\s*[\[{]/.test(text);
+    if (!looksJson && typeof window.jsyaml === "undefined") {
+      throw new Error("YAML library failed to load. The bundled vendor/js-yaml.min.js is missing or blocked. Try a JSON inventory file instead, or reload the page.");
+    }
     state.inventory = looksJson ? importJson(text) : importYaml(text);
     saveInventory(state.inventory);
     const counts = inventoryStats(state.inventory);
     refreshAll();
-    setStatus(`Imported ${file.name}: ${counts.sources} sources, ${counts.overrides} component overrides`, "ok");
+    if (counts.sources === 0) {
+      setStatus(`Imported ${file.name} but it had no data sources`, "error");
+    } else {
+      setStatus(`Imported ${file.name}: ${counts.sources} sources, ${counts.overrides} component overrides`, "ok");
+      setBanner(`Imported <strong>${escapeHtml(file.name)}</strong>: ${counts.sources} data sources, ${counts.overrides} component overrides. Switch to <a href="#" data-goto="components">Data Components</a> or <a href="#" data-goto="coverage">Detection Strategies</a> to see the impact.`, "ok");
+      $("#globalBanner")?.querySelectorAll('[data-goto]').forEach(a => a.addEventListener("click", e => { e.preventDefault(); activateTab(a.dataset.goto); }));
+    }
   } catch (e) {
     console.error("Import failed", e);
     setStatus(`Import failed: ${e.message}`, "error");
+    setBanner(`<strong>Import failed:</strong> ${escapeHtml(e.message)}`, "error");
   } finally {
     ev.target.value = ""; // allow re-selecting the same file
   }
@@ -201,20 +247,39 @@ $("#exportInventoryJson").addEventListener("click", () => {
 
 function renderInventory() {
   const root = $("#inventoryTable");
+  const summary = $("#inventorySummary");
   if (!state.attack) {
-    root.innerHTML = `<div style="padding:20px;color:var(--muted)">Load ATT&amp;CK data first.</div>`;
+    if (root) root.innerHTML = `<div style="padding:20px;color:var(--muted)">Load MITRE CTI data first (tab 1).</div>`;
+    if (summary) summary.innerHTML = "";
     return;
   }
   const filterText = state.filters.ds;
   const filterPlatform = state.filters.platform;
+  const onlyScored = !!state.filters.onlyScored;
+
+  const compScores = effectiveComponentScores(state.inventory, state.attack);
+
+  // Inventory summary across the WHOLE attack model (not affected by filters)
+  const totalSources = state.attack.dataSources.length;
+  const scoredSources = state.attack.dataSources.filter(ds => getSourceScore(ds) > 0).length;
+  const totalComps = state.attack.dataComponents.length;
+  const scoredComps = Array.from(compScores.values()).filter(v => v.score > 0).length;
+  if (summary) {
+    summary.className = "inv-summary" + (scoredSources > 0 ? " populated" : "");
+    summary.innerHTML = `
+      <div class="pill"><strong>${scoredSources} / ${totalSources}</strong>data sources scored</div>
+      <div class="pill"><strong>${scoredComps} / ${totalComps}</strong>data components covered</div>
+      <div class="pill"><strong>${state.inventory.data_sources?.length || 0}</strong>entries in saved inventory</div>
+      <div class="pill"><strong>${state.inventory.name || "Default"}</strong>inventory name</div>
+    `;
+  }
 
   const sources = state.attack.dataSources.filter(ds => {
     if (filterText && !(ds.name.toLowerCase().includes(filterText) || ds.attackId?.toLowerCase().includes(filterText))) return false;
     if (filterPlatform && !ds.platforms.includes(filterPlatform)) return false;
+    if (onlyScored && getSourceScore(ds) === 0 && !ds.components.some(c => (compScores.get(c.id)?.score || 0) > 0)) return false;
     return true;
   });
-
-  const compScores = effectiveComponentScores(state.inventory, state.attack);
 
   let html = `<div class="ds-row header">
     <div></div><div>Data source</div><div>Components</div><div>Score</div>
@@ -279,6 +344,65 @@ function renderInventory() {
       refreshAll();
     });
   });
+}
+
+// --- Data Components tab ---
+function renderComponents() {
+  const root = $("#componentTable");
+  const stats = $("#componentStats");
+  if (!root) return;
+  if (!state.attack) {
+    root.innerHTML = `<div style="padding:20px;color:var(--muted)">Load MITRE CTI data first (tab 1).</div>`;
+    if (stats) stats.innerHTML = "";
+    return;
+  }
+  const compScores = effectiveComponentScores(state.inventory, state.attack);
+  const filter = state.filters.component;
+  const minScore = state.filters.componentScore;
+  const all = state.attack.dataComponents.map(dc => {
+    const eff = compScores.get(dc.id);
+    const score = eff?.score ?? 0;
+    return {
+      id: dc.id,
+      name: dc.name,
+      sourceName: state.attack.dataSourceById.get(dc.sourceId)?.name || "?",
+      score,
+      hasOverride: !!eff?.hasOverride,
+      techCount: dc.techniqueIds.length,
+    };
+  });
+  const total = all.length;
+  const covered = all.filter(c => c.score > 0).length;
+  const good = all.filter(c => c.score >= 3).length;
+  if (stats) {
+    stats.innerHTML = `
+      <div class="stat-card"><div class="label">Total components</div><div class="value">${total}</div></div>
+      <div class="stat-card"><div class="label">Covered (score &gt; 0)</div><div class="value">${covered}</div><div class="sub">${pct(covered/Math.max(total,1))}</div></div>
+      <div class="stat-card"><div class="label">Good (score &ge; 3)</div><div class="value">${good}</div></div>
+      <div class="stat-card"><div class="label">Uncovered</div><div class="value" style="color:var(--bad)">${total - covered}</div></div>
+    `;
+  }
+  const rows = all.filter(c => {
+    if (filter && !(c.name.toLowerCase().includes(filter) || c.sourceName.toLowerCase().includes(filter))) return false;
+    if (minScore === "0" && c.score !== 0) return false;
+    if (minScore === "1" && c.score < 1) return false;
+    if (minScore === "3" && c.score < 3) return false;
+    return true;
+  }).sort((a, b) => b.score - a.score || a.sourceName.localeCompare(b.sourceName) || a.name.localeCompare(b.name));
+
+  let html = `<div class="tech-row header"><div>Component</div><div>Data source</div><div>Techniques</div><div></div><div>Score</div></div>`;
+  for (const c of rows.slice(0, 1500)) {
+    html += `
+      <div class="tech-row">
+        <div><strong>${escapeHtml(c.name)}</strong></div>
+        <div style="color:var(--muted)">${escapeHtml(c.sourceName)}</div>
+        <div style="color:var(--muted);font-size:11px">${c.techCount} tech</div>
+        <div style="color:var(--muted);font-size:11px">${c.hasOverride ? "override" : ""}</div>
+        <div><span class="score-badge s${c.score}">${c.score}</span></div>
+      </div>
+    `;
+  }
+  root.innerHTML = html;
 }
 
 function scoreSelect(score, kind, key) {
@@ -699,6 +823,7 @@ function pct(n) { return `${Math.round((n || 0) * 100)}%`; }
 
 // --- init ---
 (async () => {
+  checkVendorLibs();
   // Try cached only — don't auto-pull ~30 MB on first visit.
   try {
     setStatus("Checking cache…", "busy");
@@ -706,10 +831,10 @@ function pct(n) { return `${Math.round((n || 0) * 100)}%`; }
     onAttackLoaded("cache");
   } catch (e) {
     if (e.code === "NO_CACHE") {
-      setStatus("Click Load / Refresh to fetch ATT&CK from github.com/mitre/cti", "");
+      setStatus("Click Load / Refresh on tab 1 (MITRE CTI), or upload the sample mini-bundle.", "");
     } else {
       setStatus(`Cache check failed: ${e.message}`, "error");
     }
   }
-  renderInventory();
+  refreshAll();
 })();
