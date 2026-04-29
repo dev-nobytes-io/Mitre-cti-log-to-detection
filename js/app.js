@@ -7,16 +7,25 @@ import {
 import { computeCoverage } from "./coverage.js";
 import { buildNavigatorLayer } from "./navigator.js";
 import { conceptualDiagram, sourceDiagram, techniqueDiagram, overviewDiagram } from "./diagrams.js";
+import {
+  loadThreats, saveThreats, resetThreats,
+  isGroupSelected, setGroupSelected, clearSelection,
+  selectedGroups, gapAnalysis, buildThreatLayer,
+  exportThreatsYaml, importThreatsYaml, importThreatsJson,
+} from "./threats.js";
 
 const state = {
   attack: null,
   inventory: loadInventory(),
+  threats: loadThreats(),
   filters: {
     ds: "",
     platform: "",
     tech: "",
     tactic: "",
     coverage: "",
+    group: "",
+    threatStatus: "",
   },
   expanded: new Set(),
   graph: {
@@ -38,6 +47,17 @@ function setStatus(text, kind = "") {
   el.className = "status" + (kind ? " " + kind : "");
 }
 
+// Re-render every view that depends on inventory or attack state. Cheap to
+// run; coverage / mermaid are recomputed lazily and bail early when there's
+// no attack data loaded.
+function refreshAll() {
+  renderInventory();
+  renderCoverage();
+  renderGraph();
+  renderExport();
+  renderThreats();
+}
+
 // Tabs
 $$(".tab").forEach(btn => {
   btn.addEventListener("click", () => {
@@ -47,6 +67,7 @@ $$(".tab").forEach(btn => {
     if (id === "coverage") renderCoverage();
     if (id === "graph") renderGraph();
     if (id === "export") renderExport();
+    if (id === "threats") renderThreats();
   });
 });
 
@@ -72,6 +93,8 @@ $("#stixFile").addEventListener("change", async ev => {
   } catch (e) {
     console.error(e);
     setStatus(`Failed to read file: ${e.message}`, "error");
+  } finally {
+    ev.target.value = "";
   }
 });
 
@@ -88,11 +111,12 @@ async function runLoad({ domain, url, force }) {
 
 function onAttackLoaded(source) {
   const a = state.attack;
-  setStatus(`Loaded ${a.dataSources.length} data sources, ${a.techniques.length} techniques (${source})`, "ok");
+  setStatus(`Loaded ${a.dataSources.length} data sources, ${a.techniques.length} techniques, ${a.groups?.length || 0} groups (${source})`, "ok");
   renderSetupSummary();
-  renderInventory();
   populatePlatformFilter();
   populateTacticFilter();
+  populateGroupSelectors();
+  refreshAll();
   // Auto-show inventory tab once data is loaded
   if ($(".tab.active").dataset.tab === "setup") {
     $$(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === "inventory"));
@@ -131,32 +155,42 @@ function populateTacticFilter() {
 $("#dsFilter").addEventListener("input", e => { state.filters.ds = e.target.value.toLowerCase(); renderInventory(); });
 $("#platformFilter").addEventListener("change", e => { state.filters.platform = e.target.value; renderInventory(); });
 $("#setAllBtn").addEventListener("click", () => {
-  if (!state.attack) return;
+  if (!state.attack) { setStatus("Load ATT&CK first", "error"); return; }
   const score = Number($("#setAllValue").value);
   setAllSources(state.inventory, state.attack, score);
   saveInventory(state.inventory);
-  renderInventory();
+  refreshAll();
 });
 $("#resetInventoryBtn").addEventListener("click", () => {
   if (!confirm("Reset the entire inventory?")) return;
   state.inventory = resetInventory();
-  renderInventory();
+  refreshAll();
 });
 $("#inventoryFile").addEventListener("change", async ev => {
   const file = ev.target.files?.[0];
   if (!file) return;
   try {
     const text = await file.text();
-    const isYaml = /\.ya?ml$/i.test(file.name) || /^\s*[a-zA-Z_-]+:/.test(text);
-    state.inventory = isYaml ? importYaml(text) : importJson(text);
+    if (typeof window.jsyaml === "undefined") throw new Error("YAML library not loaded yet — reload the page");
+    const looksJson = /\.json$/i.test(file.name) || /^\s*[\[{]/.test(text);
+    state.inventory = looksJson ? importJson(text) : importYaml(text);
     saveInventory(state.inventory);
-    renderInventory();
-    setStatus(`Imported inventory from ${file.name}`, "ok");
+    const counts = inventoryStats(state.inventory);
+    refreshAll();
+    setStatus(`Imported ${file.name}: ${counts.sources} sources, ${counts.overrides} component overrides`, "ok");
   } catch (e) {
-    console.error(e);
+    console.error("Import failed", e);
     setStatus(`Import failed: ${e.message}`, "error");
+  } finally {
+    ev.target.value = ""; // allow re-selecting the same file
   }
 });
+
+function inventoryStats(inv) {
+  const sources = (inv.data_sources || []).length;
+  const overrides = (inv.data_sources || []).reduce((n, e) => n + (e.data_source?.length || 0), 0);
+  return { sources, overrides };
+}
 $("#exportInventoryYaml").addEventListener("click", () => {
   downloadText(exportYaml(state.inventory), "inventory.yaml", "text/yaml");
 });
@@ -241,7 +275,7 @@ function renderInventory() {
         setComponentScore(state.inventory, src, comp, value);
       }
       saveInventory(state.inventory);
-      renderInventory();
+      refreshAll();
     });
   });
 }
@@ -325,6 +359,152 @@ function renderCoverage() {
   }
   root.innerHTML = html;
 }
+
+// --- Threats tab ---
+$("#groupFilter").addEventListener("input", e => { state.filters.group = e.target.value.toLowerCase(); renderThreats(); });
+$("#clearGroupSel").addEventListener("click", () => {
+  state.threats = clearSelection(state.threats);
+  saveThreats(state.threats);
+  refreshAll();
+});
+$("#groupsFile").addEventListener("change", async ev => {
+  const file = ev.target.files?.[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    if (typeof window.jsyaml === "undefined") throw new Error("YAML library not loaded yet — reload the page");
+    const looksJson = /\.json$/i.test(file.name) || /^\s*[\[{]/.test(text);
+    state.threats = looksJson ? importThreatsJson(text) : importThreatsYaml(text);
+    saveThreats(state.threats);
+    refreshAll();
+    setStatus(`Imported ${state.threats.groups.length} groups from ${file.name}`, "ok");
+  } catch (e) {
+    console.error("Group import failed", e);
+    setStatus(`Group import failed: ${e.message}`, "error");
+  } finally {
+    ev.target.value = "";
+  }
+});
+$("#exportGroupsYaml").addEventListener("click", () => {
+  downloadText(exportThreatsYaml(state.threats), "groups.yaml", "text/yaml");
+});
+$("#threatStatusFilter").addEventListener("change", e => { state.filters.threatStatus = e.target.value; renderThreats(); });
+
+$("#downloadThreatLayer").addEventListener("click", () => downloadThreatLayer("groups"));
+$("#downloadGapLayer").addEventListener("click", () => downloadThreatLayer("gaps"));
+
+function downloadThreatLayer(mode) {
+  if (!state.attack) { setStatus("Load ATT&CK first", "error"); return; }
+  const cov = computeCoverage(state.attack, effectiveComponentScores(state.inventory, state.attack));
+  const rowsByStix = new Map(cov.rows.map(r => [r.stixId, r]));
+  const layer = buildThreatLayer({ attack: state.attack, threats: state.threats, mode, coverageRowsByStixId: rowsByStix });
+  if (!layer) { setStatus("Select at least one group first", "error"); return; }
+  downloadText(JSON.stringify(layer, null, 2), `${slug(layer.name)}.json`, "application/json");
+}
+
+function populateGroupSelectors() {
+  // Nothing fancy; renderThreats does the list.
+}
+
+function renderThreats() {
+  const listRoot = $("#groupList");
+  const tableRoot = $("#threatTable");
+  const statsRoot = $("#threatStats");
+  if (!state.attack) {
+    listRoot.innerHTML = `<div style="padding:20px;color:var(--muted)">Load ATT&CK data first.</div>`;
+    tableRoot.innerHTML = "";
+    statsRoot.innerHTML = "";
+    return;
+  }
+
+  // Build group list with selection state
+  const filter = state.filters.group;
+  const filtered = state.attack.groups.filter(g => {
+    if (!filter) return true;
+    const hay = [g.attackId, g.name, ...(g.aliases || [])].join(" ").toLowerCase();
+    return hay.includes(filter);
+  });
+
+  let html = `<div class="group-row header"><div></div><div>Group</div><div>ID</div><div>Techniques</div></div>`;
+  for (const g of filtered.slice(0, 1000)) {
+    const sel = isGroupSelected(state.threats, g);
+    const aliases = g.aliases.length ? `<div class="aliases">a.k.a. ${escapeHtml(g.aliases.slice(0, 3).join(", "))}${g.aliases.length > 3 ? ", …" : ""}</div>` : "";
+    html += `
+      <label class="group-row ${sel ? "selected" : ""}">
+        <input type="checkbox" data-gid="${escapeAttr(g.id)}" ${sel ? "checked" : ""} />
+        <div><div class="name">${escapeHtml(g.name)}</div>${aliases}</div>
+        <div class="tech-id">${escapeHtml(g.attackId)}</div>
+        <div style="color:var(--muted)">${g.techniqueIds.length} techniques</div>
+      </label>
+    `;
+  }
+  if (filtered.length > 1000) {
+    html += `<div class="group-row"><div></div><div style="color:var(--muted)">Showing first 1000 of ${filtered.length} groups; refine filter.</div><div></div><div></div></div>`;
+  }
+  listRoot.innerHTML = html;
+  listRoot.querySelectorAll('input[type=checkbox][data-gid]').forEach(cb => {
+    cb.addEventListener("change", () => {
+      const gid = cb.dataset.gid;
+      const group = state.attack.groupById.get(gid);
+      state.threats = setGroupSelected(state.threats, group, cb.checked);
+      saveThreats(state.threats);
+      // Don't re-render the whole list (would lose scroll position); just refresh stats + table + row class
+      cb.closest(".group-row").classList.toggle("selected", cb.checked);
+      renderThreatsAnalysis();
+    });
+  });
+
+  renderThreatsAnalysis();
+}
+
+function renderThreatsAnalysis() {
+  const tableRoot = $("#threatTable");
+  const statsRoot = $("#threatStats");
+  if (!state.attack) return;
+  const cov = computeCoverage(state.attack, effectiveComponentScores(state.inventory, state.attack));
+  const rowsByStix = new Map(cov.rows.map(r => [r.stixId, r]));
+  const gap = gapAnalysis(state.threats, state.attack, rowsByStix);
+
+  if (!gap.groups.length) {
+    statsRoot.innerHTML = `<div class="stat-card"><div class="label">No groups selected</div><div class="value">—</div><div class="sub">Pick groups above to see gaps</div></div>`;
+    tableRoot.innerHTML = "";
+    return;
+  }
+
+  statsRoot.innerHTML = `
+    <div class="stat-card"><div class="label">Selected groups</div><div class="value">${gap.groups.length}</div><div class="sub">${escapeHtml(gap.groups.slice(0, 4).map(g => g.attackId).join(", "))}${gap.groups.length > 4 ? "…" : ""}</div></div>
+    <div class="stat-card"><div class="label">Threat techniques</div><div class="value">${gap.summary.totalThreats}</div></div>
+    <div class="stat-card"><div class="label">Covered</div><div class="value">${gap.summary.covered}</div></div>
+    <div class="stat-card"><div class="label">Partial</div><div class="value">${gap.summary.partial}</div></div>
+    <div class="stat-card"><div class="label">Gaps</div><div class="value" style="color:var(--bad)">${gap.summary.gaps}</div><div class="sub">no coverage</div></div>
+    <div class="stat-card"><div class="label">Undetectable</div><div class="value" style="color:var(--warn)">${gap.summary.undetectable}</div><div class="sub">no detections defined</div></div>
+  `;
+
+  const fStatus = state.filters.threatStatus;
+  const rows = gap.threatTechniques.filter(r => !fStatus || r.status === fStatus);
+
+  let html = `<div class="tech-row header"><div>ID</div><div>Technique</div><div>Tactics</div><div>Status</div><div>Score</div></div>`;
+  for (const r of rows.slice(0, 1500)) {
+    const tech = r.tech;
+    const groupBadge = `<span style="color:var(--muted);font-size:11px"> · ${r.groupCount} group${r.groupCount === 1 ? "" : "s"}</span>`;
+    html += `
+      <div class="tech-row" title="${escapeAttr(`Used by ${r.groups.map(g => g.attackId).join(", ")}`)}">
+        <div class="tech-id">${escapeHtml(tech.attackId)}</div>
+        <div>${escapeHtml(tech.name)}${groupBadge}</div>
+        <div class="tech-tactics">${escapeHtml(tech.tactics.join(", "))}</div>
+        <div><span class="score-badge ${statusClass(r.status)}">${escapeHtml(statusLabel(r.status))}</span></div>
+        <div><span class="score-badge s${Math.round(r.weightedScore)}">${r.weightedScore.toFixed(2)}</span></div>
+      </div>
+    `;
+  }
+  if (rows.length > 1500) {
+    html += `<div class="tech-row"><div></div><div style="color:var(--muted)">Showing first 1500 of ${rows.length}; refine filters.</div><div></div><div></div><div></div></div>`;
+  }
+  tableRoot.innerHTML = html;
+}
+
+function statusClass(s) { return ({ gap: "s1", undetectable: "s2", partial: "s3", covered: "s5" })[s] || "s0"; }
+function statusLabel(s) { return ({ gap: "GAP", undetectable: "no-detect", partial: "partial", covered: "covered" })[s] || s; }
 
 // --- Relationships (mermaid) tab ---
 $("#graphSourceSelect").addEventListener("change", e => { state.graph.sourceId = e.target.value; renderGraph(); });

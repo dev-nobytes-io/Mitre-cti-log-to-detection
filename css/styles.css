@@ -50,7 +50,10 @@ code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-si
   padding: 0 24px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.tabs::-webkit-scrollbar { display: none; }
 .tab {
   background: transparent;
   border: none;
@@ -296,6 +299,36 @@ button.danger { color: var(--bad); border-color: var(--bad); }
   white-space: pre-wrap;
 }
 
+/* Threats / groups list */
+.group-list {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  max-height: 460px;
+  overflow: auto;
+}
+.group-row {
+  display: grid;
+  grid-template-columns: 28px 1fr 90px 120px;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+  font-size: 13px;
+}
+.group-row.header {
+  background: var(--panel);
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  position: sticky; top: 0; z-index: 1;
+}
+.group-row:hover { background: var(--row-hover); }
+.group-row .name { font-weight: 600; }
+.group-row .aliases { color: var(--muted); font-size: 11px; }
+.group-row.selected { background: rgba(47, 129, 247, 0.08); }
+
 footer {
   position: fixed;
   bottom: 0; left: 0; right: 0;
@@ -304,4 +337,110 @@ footer {
   background: var(--panel);
   color: var(--muted);
   font-size: 11px;
+  z-index: 5;
+}
+
+/* ---------- Mobile / narrow viewports ---------- */
+@media (max-width: 760px) {
+  body { font-size: 14px; padding-bottom: 56px; }
+
+  .topbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    padding: 10px 14px;
+  }
+  .brand h1 { font-size: 16px; }
+  .subtitle { font-size: 11px; }
+  .status { font-size: 11px; align-self: stretch; }
+
+  .tabs { padding: 0 8px; gap: 0; }
+  .tab { padding: 10px 12px; font-size: 12px; white-space: nowrap; }
+
+  main { padding: 14px 14px 80px; }
+
+  .row { gap: 8px; }
+  .row > * { flex: 1 1 100%; }
+  .row > button, .row > .file-import { flex: 0 1 auto; }
+
+  input[type="text"],
+  input[type="search"],
+  input[type="number"],
+  select { min-width: 0; width: 100%; }
+  input[type="search"] { min-width: 0; }
+  label { width: 100%; }
+
+  /* Inventory rows: stack into a card layout */
+  .ds-row {
+    grid-template-columns: 24px 1fr;
+    grid-template-areas:
+      "toggle name"
+      ".      meta"
+      ".      score";
+    row-gap: 4px;
+  }
+  .ds-row .toggle { grid-area: toggle; align-self: start; padding-top: 2px; }
+  .ds-row > div:nth-child(2) { grid-area: name; }
+  .ds-row > div:nth-child(3) { grid-area: meta; color: var(--muted); font-size: 12px; }
+  .ds-row > div:nth-child(4) { grid-area: score; }
+  .ds-row.header { display: none; }
+
+  .ds-components { padding: 8px 14px 8px 38px; }
+  .dc-row {
+    grid-template-columns: 1fr;
+    grid-template-areas: "name" "meta" "score";
+    row-gap: 4px;
+  }
+  .dc-row > div:nth-child(1) { grid-area: name; }
+  .dc-row > div:nth-child(2) { grid-area: meta; }
+  .dc-row > div:nth-child(3) { grid-area: score; }
+
+  /* Coverage rows: stack the 5 columns vertically */
+  .tech-row {
+    grid-template-columns: 70px 1fr 70px;
+    grid-template-areas:
+      "id name score"
+      "tac tac tac"
+      "bar bar bar";
+    row-gap: 4px;
+    padding: 10px 12px;
+  }
+  .tech-row.header {
+    grid-template-columns: 70px 1fr 70px;
+    grid-template-areas: "id name score";
+  }
+  .tech-row.header > div:nth-child(3),
+  .tech-row.header > div:nth-child(4) { display: none; }
+  .tech-row > div:nth-child(1) { grid-area: id; }
+  .tech-row > div:nth-child(2) { grid-area: name; }
+  .tech-row > div:nth-child(3) { grid-area: tac; color: var(--muted); font-size: 11px; }
+  .tech-row > div:nth-child(4) { grid-area: bar; }
+  .tech-row > div:nth-child(5) { grid-area: score; justify-self: end; }
+
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .stat-card .value { font-size: 18px; }
+
+  .group-row {
+    grid-template-columns: 24px 1fr;
+    grid-template-areas:
+      "chk name"
+      ".   aliases"
+      ".   meta";
+    row-gap: 2px;
+  }
+  .group-row > input[type=checkbox] { grid-area: chk; }
+  .group-row > div:nth-child(2) { grid-area: name; }
+  .group-row > div:nth-child(3) { grid-area: aliases; }
+  .group-row > div:nth-child(4) { grid-area: meta; }
+  .group-row.header { display: none; }
+
+  .preview { font-size: 11px; max-height: 240px; }
+
+  footer { padding: 6px 14px; font-size: 10px; line-height: 1.4; }
+}
+
+/* Touch tweaks */
+@media (hover: none) and (pointer: coarse) {
+  button, select { min-height: 36px; }
+  .tab { min-height: 40px; }
 }

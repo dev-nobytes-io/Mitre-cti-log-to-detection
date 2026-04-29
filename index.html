@@ -24,8 +24,9 @@
     <button class="tab active" data-tab="setup" role="tab">1. Load ATT&amp;CK</button>
     <button class="tab" data-tab="inventory" role="tab">2. Inventory</button>
     <button class="tab" data-tab="coverage" role="tab">3. Coverage</button>
-    <button class="tab" data-tab="graph" role="tab">4. Relationships</button>
-    <button class="tab" data-tab="export" role="tab">5. Export</button>
+    <button class="tab" data-tab="threats" role="tab">4. Threats</button>
+    <button class="tab" data-tab="graph" role="tab">5. Relationships</button>
+    <button class="tab" data-tab="export" role="tab">6. Export</button>
   </nav>
 
   <main>
@@ -99,6 +100,37 @@
         </select>
       </div>
       <div id="techniqueTable" class="tech-list"></div>
+    </section>
+
+    <section class="panel" id="tab-threats" role="tabpanel">
+      <h2>Threat groups (gap analysis)</h2>
+      <p>Pick MITRE ATT&amp;CK threat-actor groups (e.g. APT29, FIN7) to see which of <em>their</em> techniques you can detect. Gaps surface techniques used by selected groups that your data sources can't catch.</p>
+      <div class="row">
+        <input type="search" id="groupFilter" placeholder="Filter groups (name, alias, ID)…" />
+        <button id="clearGroupSel" class="danger">Clear selection</button>
+        <label class="file-import">Import groups (YAML/JSON)
+          <input type="file" id="groupsFile" accept=".yaml,.yml,.json" />
+        </label>
+        <button id="exportGroupsYaml">Export groups YAML</button>
+      </div>
+      <div class="row">
+        <button id="downloadThreatLayer" class="primary">Download threat-groups layer</button>
+        <button id="downloadGapLayer" class="primary">Download gap layer</button>
+      </div>
+      <h3 class="diagram-h">Available groups</h3>
+      <div id="groupList" class="group-list"></div>
+      <h3 class="diagram-h">Threat coverage</h3>
+      <div class="stats" id="threatStats"></div>
+      <div class="row">
+        <select id="threatStatusFilter">
+          <option value="">All statuses</option>
+          <option value="gap">Gap (no coverage)</option>
+          <option value="undetectable">Undetectable (no detections defined)</option>
+          <option value="partial">Partial</option>
+          <option value="covered">Covered</option>
+        </select>
+      </div>
+      <div id="threatTable" class="tech-list"></div>
     </section>
 
     <section class="panel" id="tab-graph" role="tabpanel">
