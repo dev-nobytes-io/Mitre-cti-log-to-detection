@@ -2,10 +2,12 @@
 // Exposes:
 //   loadAttack({domain, url, signal, onProgress}) -> AttackData
 //   loadAttackFromBundle(bundle) -> AttackData
+//   loadOfflineBundle() -> AttackData      // bundled with the site
 //
 // Caches the raw bundle in IndexedDB keyed by domain+version.
 
 const CTI_BASE = "https://raw.githubusercontent.com/mitre/cti/master";
+const OFFLINE_BUNDLE_URL = "vendor/attack-offline.json";
 const DB_NAME = "attack-cache";
 const DB_STORE = "bundles";
 
@@ -84,7 +86,17 @@ export async function loadAttack({ domain = "enterprise-attack", url, onProgress
 }
 
 export function loadAttackFromBundle(bundle, meta = {}) {
-  return indexBundle(bundle, { domain: meta.domain || "custom", source: "file", fetchedAt: new Date().toISOString() });
+  return indexBundle(bundle, { domain: meta.domain || "custom", source: meta.source || "file", fetchedAt: new Date().toISOString() });
+}
+
+// Loads the offline ATT&CK bundle that ships with the static site.
+// Same-origin so it works even when github.com is blocked.
+export async function loadOfflineBundle({ onProgress } = {}) {
+  onProgress?.({ phase: "fetch", message: `Loading bundled offline ATT&CK` });
+  const res = await fetch(OFFLINE_BUNDLE_URL, { cache: "force-cache" });
+  if (!res.ok) throw new Error(`Failed to load bundled ATT&CK: ${res.status}`);
+  const bundle = await res.json();
+  return indexBundle(bundle, { domain: "enterprise-attack-offline", source: "offline-bundle", fetchedAt: new Date().toISOString() });
 }
 
 function externalAttackId(obj) {
