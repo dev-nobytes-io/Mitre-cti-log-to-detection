@@ -13,7 +13,7 @@
   <header class="topbar">
     <div class="brand">
       <h1>ATT&amp;CK Data Source Inventory</h1>
-      <p class="subtitle">Map your logs &rarr; data components &rarr; techniques &rarr; ATT&amp;CK Navigator layer</p>
+      <p class="subtitle">MITRE CTI &rarr; log inventory &rarr; detections &rarr; threats &rarr; gap analysis</p>
     </div>
     <div class="status" id="status">
       <span id="statusText">Ready</span>
@@ -21,18 +21,28 @@
   </header>
 
   <nav class="tabs" role="tablist">
-    <button class="tab active" data-tab="setup" role="tab">1. Load ATT&amp;CK</button>
-    <button class="tab" data-tab="inventory" role="tab">2. Inventory</button>
-    <button class="tab" data-tab="coverage" role="tab">3. Coverage</button>
+    <button class="tab active" data-tab="setup" role="tab">1. MITRE CTI</button>
+    <button class="tab" data-tab="inventory" role="tab">2. Log Inventory</button>
+    <button class="tab" data-tab="coverage" role="tab">3. Detections</button>
     <button class="tab" data-tab="threats" role="tab">4. Threats</button>
-    <button class="tab" data-tab="graph" role="tab">5. Relationships</button>
-    <button class="tab" data-tab="export" role="tab">6. Export</button>
+    <button class="tab" data-tab="gaps" role="tab">5. Gap Analysis</button>
+    <button class="tab" data-tab="graph" role="tab">Diagrams</button>
+    <button class="tab" data-tab="export" role="tab">Export</button>
   </nav>
+  <select class="tabs-mobile" id="tabsMobile" aria-label="Section">
+    <option value="setup">1. MITRE CTI</option>
+    <option value="inventory">2. Log Inventory</option>
+    <option value="coverage">3. Detections</option>
+    <option value="threats">4. Threats</option>
+    <option value="gaps">5. Gap Analysis</option>
+    <option value="graph">Diagrams</option>
+    <option value="export">Export</option>
+  </select>
 
   <main>
     <section class="panel active" id="tab-setup" role="tabpanel">
-      <h2>Load ATT&amp;CK STIX data</h2>
-      <p>Pulls the latest <code>enterprise-attack.json</code> from <a href="https://github.com/mitre/cti" target="_blank" rel="noopener">github.com/mitre/cti</a>. Cached in your browser after the first load.</p>
+      <h2>1. MITRE CTI</h2>
+      <p>Pulls the latest <code>enterprise-attack.json</code> from <a href="https://github.com/mitre/cti" target="_blank" rel="noopener">github.com/mitre/cti</a>. Cached in your browser (IndexedDB) after the first load.</p>
       <div class="row">
         <label>Domain
           <select id="domainSelect">
@@ -48,16 +58,17 @@
       <div class="row">
         <button id="loadBtn" class="primary">Load / Refresh</button>
         <button id="clearCacheBtn">Clear cache</button>
-        <label class="file-import">Load local STIX file
+        <label class="file-import">Upload STIX bundle
           <input type="file" id="stixFile" accept=".json" />
         </label>
+        <a class="link-btn" href="samples/stix-mini-bundle.json" download>Sample mini-bundle</a>
       </div>
       <div id="setupSummary" class="summary"></div>
     </section>
 
     <section class="panel" id="tab-inventory" role="tabpanel">
-      <h2>Data Source Inventory</h2>
-      <p>Score each data source you collect (0 = none, 1 = poor &hellip; 5 = excellent). Components inherit the source's score unless you override.</p>
+      <h2>2. Log Inventory</h2>
+      <p>Score each ATT&amp;CK data source you collect (0 = none, 5 = excellent). Components inherit the source's score unless overridden. Saved to your browser automatically.</p>
       <div class="row">
         <input type="search" id="dsFilter" placeholder="Filter data sources&hellip;" />
         <select id="platformFilter">
@@ -77,6 +88,13 @@
         <label class="file-import">Import inventory (YAML/JSON)
           <input type="file" id="inventoryFile" accept=".yaml,.yml,.json" />
         </label>
+        <span class="sample-links">
+          Samples:
+          <a href="samples/persona-mature-enterprise.yaml" download>mature</a> ·
+          <a href="samples/persona-cloud-saas.yaml" download>cloud</a> ·
+          <a href="samples/persona-network-mssp.yaml" download>mssp</a> ·
+          <a href="samples/persona-greenfield-startup.yaml" download>greenfield</a>
+        </span>
         <button id="exportInventoryYaml">Export YAML</button>
         <button id="exportInventoryJson">Export JSON</button>
         <button id="resetInventoryBtn" class="danger">Reset</button>
@@ -85,8 +103,8 @@
     </section>
 
     <section class="panel" id="tab-coverage" role="tabpanel">
-      <h2>Detection Coverage</h2>
-      <p>Techniques whose detection requires data components you have. Score = max quality across detecting components, weighted by how many of the technique's detecting components you cover.</p>
+      <h2>3. Detections available</h2>
+      <p>Techniques you can detect, derived from the data components your inventory covers. Score = max source quality &times; covered/total component ratio.</p>
       <div class="stats" id="coverageStats"></div>
       <div class="row">
         <input type="search" id="techFilter" placeholder="Filter techniques (id, name, tactic)&hellip;" />
@@ -99,27 +117,37 @@
           <option value="uncovered">Uncovered</option>
         </select>
       </div>
+      <div class="row">
+        <button id="downloadDetectionsLayer" class="primary">Download detections Navigator layer</button>
+      </div>
       <div id="techniqueTable" class="tech-list"></div>
     </section>
 
     <section class="panel" id="tab-threats" role="tabpanel">
-      <h2>Threat groups (gap analysis)</h2>
-      <p>Pick MITRE ATT&amp;CK threat-actor groups (e.g. APT29, FIN7) to see which of <em>their</em> techniques you can detect. Gaps surface techniques used by selected groups that your data sources can't catch.</p>
+      <h2>4. Threats</h2>
+      <p>Pick the MITRE ATT&amp;CK threat-actor groups (e.g. APT29, FIN7) you care about. The next tab compares their techniques against your detection coverage.</p>
       <div class="row">
-        <input type="search" id="groupFilter" placeholder="Filter groups (name, alias, ID)…" />
+        <input type="search" id="groupFilter" placeholder="Filter groups (name, alias, ID)&hellip;" />
         <button id="clearGroupSel" class="danger">Clear selection</button>
         <label class="file-import">Import groups (YAML/JSON)
           <input type="file" id="groupsFile" accept=".yaml,.yml,.json" />
         </label>
+        <span class="sample-links">
+          Samples:
+          <a href="samples/threats.example.yaml" download>mixed</a> ·
+          <a href="samples/threats-ransomware.yaml" download>ransomware crews</a> ·
+          <a href="samples/threats-state-apts.yaml" download>state APTs</a> ·
+          <a href="samples/threats-financial.yaml" download>financial</a>
+        </span>
         <button id="exportGroupsYaml">Export groups YAML</button>
       </div>
-      <div class="row">
-        <button id="downloadThreatLayer" class="primary">Download threat-groups layer</button>
-        <button id="downloadGapLayer" class="primary">Download gap layer</button>
-      </div>
-      <h3 class="diagram-h">Available groups</h3>
+      <div class="stats" id="threatPickerStats"></div>
       <div id="groupList" class="group-list"></div>
-      <h3 class="diagram-h">Threat coverage</h3>
+    </section>
+
+    <section class="panel" id="tab-gaps" role="tabpanel">
+      <h2>5. Gap analysis</h2>
+      <p>Cross-references the techniques used by the threat groups you picked against your detection coverage. Gaps are techniques those groups use that your data sources can't catch.</p>
       <div class="stats" id="threatStats"></div>
       <div class="row">
         <select id="threatStatusFilter">
@@ -129,6 +157,8 @@
           <option value="partial">Partial</option>
           <option value="covered">Covered</option>
         </select>
+        <button id="downloadThreatLayer" class="primary">Download threat-groups layer</button>
+        <button id="downloadGapLayer" class="primary">Download gap layer</button>
       </div>
       <div id="threatTable" class="tech-list"></div>
     </section>
@@ -168,8 +198,8 @@
     </section>
 
     <section class="panel" id="tab-export" role="tabpanel">
-      <h2>Export ATT&amp;CK Navigator Layer</h2>
-      <p>Produces a layer JSON compatible with <a href="https://mitre-attack.github.io/attack-navigator/" target="_blank" rel="noopener">MITRE ATT&amp;CK Navigator</a>. Drop the file into Navigator (Open Existing Layer &rarr; Upload).</p>
+      <h2>Export ATT&amp;CK Navigator layer</h2>
+      <p>Customise and download a Navigator layer JSON of your detection coverage. Open it in <a href="https://mitre-attack.github.io/attack-navigator/" target="_blank" rel="noopener">MITRE ATT&amp;CK Navigator</a> via <em>Open Existing Layer &rarr; Upload from local</em>. (Threat-group and gap layers are exported from the Threats and Gap-Analysis tabs.)</p>
       <div class="row">
         <label>Layer name <input type="text" id="layerName" value="Data source coverage" /></label>
         <label>Description <input type="text" id="layerDesc" value="Detection coverage from data source inventory" /></label>

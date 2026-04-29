@@ -59,17 +59,18 @@ function refreshAll() {
 }
 
 // Tabs
-$$(".tab").forEach(btn => {
-  btn.addEventListener("click", () => {
-    $$(".tab").forEach(b => b.classList.toggle("active", b === btn));
-    const id = btn.dataset.tab;
-    $$(".panel").forEach(p => p.classList.toggle("active", p.id === `tab-${id}`));
-    if (id === "coverage") renderCoverage();
-    if (id === "graph") renderGraph();
-    if (id === "export") renderExport();
-    if (id === "threats") renderThreats();
-  });
-});
+function activateTab(id) {
+  $$(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === id));
+  $$(".panel").forEach(p => p.classList.toggle("active", p.id === `tab-${id}`));
+  const sel = $("#tabsMobile");
+  if (sel && sel.value !== id) sel.value = id;
+  if (id === "coverage") renderCoverage();
+  if (id === "graph") renderGraph();
+  if (id === "export") renderExport();
+  if (id === "threats" || id === "gaps") renderThreats();
+}
+$$(".tab").forEach(btn => btn.addEventListener("click", () => activateTab(btn.dataset.tab)));
+$("#tabsMobile")?.addEventListener("change", e => activateTab(e.target.value));
 
 // --- Setup tab ---
 $("#loadBtn").addEventListener("click", async () => {
@@ -388,10 +389,16 @@ $("#groupsFile").addEventListener("change", async ev => {
 $("#exportGroupsYaml").addEventListener("click", () => {
   downloadText(exportThreatsYaml(state.threats), "groups.yaml", "text/yaml");
 });
-$("#threatStatusFilter").addEventListener("change", e => { state.filters.threatStatus = e.target.value; renderThreats(); });
+$("#threatStatusFilter").addEventListener("change", e => { state.filters.threatStatus = e.target.value; renderGapAnalysis(); });
 
 $("#downloadThreatLayer").addEventListener("click", () => downloadThreatLayer("groups"));
 $("#downloadGapLayer").addEventListener("click", () => downloadThreatLayer("gaps"));
+$("#downloadDetectionsLayer")?.addEventListener("click", () => {
+  if (!state.attack) { setStatus("Load ATT&CK first", "error"); return; }
+  const layer = currentLayer();
+  if (!layer) return;
+  downloadText(JSON.stringify(layer, null, 2), `${slug(layer.name)}.json`, "application/json");
+});
 
 function downloadThreatLayer(mode) {
   if (!state.attack) { setStatus("Load ATT&CK first", "error"); return; }
@@ -408,12 +415,11 @@ function populateGroupSelectors() {
 
 function renderThreats() {
   const listRoot = $("#groupList");
-  const tableRoot = $("#threatTable");
-  const statsRoot = $("#threatStats");
+  const pickerStats = $("#threatPickerStats");
   if (!state.attack) {
-    listRoot.innerHTML = `<div style="padding:20px;color:var(--muted)">Load ATT&CK data first.</div>`;
-    tableRoot.innerHTML = "";
-    statsRoot.innerHTML = "";
+    if (listRoot) listRoot.innerHTML = `<div style="padding:20px;color:var(--muted)">Load ATT&CK data first.</div>`;
+    if (pickerStats) pickerStats.innerHTML = "";
+    renderGapAnalysis();
     return;
   }
 
@@ -424,6 +430,14 @@ function renderThreats() {
     const hay = [g.attackId, g.name, ...(g.aliases || [])].join(" ").toLowerCase();
     return hay.includes(filter);
   });
+  const selectedCount = (state.threats.groups || []).filter(g => g.enabled).length;
+
+  if (pickerStats) {
+    pickerStats.innerHTML = `
+      <div class="stat-card"><div class="label">Available groups</div><div class="value">${state.attack.groups.length}</div></div>
+      <div class="stat-card"><div class="label">Selected</div><div class="value">${selectedCount}</div><div class="sub">switch to Gap Analysis to see results</div></div>
+    `;
+  }
 
   let html = `<div class="group-row header"><div></div><div>Group</div><div>ID</div><div>Techniques</div></div>`;
   for (const g of filtered.slice(0, 1000)) {
@@ -448,16 +462,20 @@ function renderThreats() {
       const group = state.attack.groupById.get(gid);
       state.threats = setGroupSelected(state.threats, group, cb.checked);
       saveThreats(state.threats);
-      // Don't re-render the whole list (would lose scroll position); just refresh stats + table + row class
       cb.closest(".group-row").classList.toggle("selected", cb.checked);
-      renderThreatsAnalysis();
+      // Update picker stats and gap analysis without rebuilding the whole list
+      const newCount = (state.threats.groups || []).filter(g => g.enabled).length;
+      if (pickerStats) {
+        pickerStats.querySelectorAll(".stat-card .value")[1].textContent = newCount;
+      }
+      renderGapAnalysis();
     });
   });
 
-  renderThreatsAnalysis();
+  renderGapAnalysis();
 }
 
-function renderThreatsAnalysis() {
+function renderGapAnalysis() {
   const tableRoot = $("#threatTable");
   const statsRoot = $("#threatStats");
   if (!state.attack) return;

@@ -1,0 +1,16 @@
+# Threat-group selection: financially-motivated cybercrime
+# ------------------------------------------------------------------
+# Crews that target financial institutions, payment processing, and
+# crypto. Heavy on credential theft, lateral movement, and BEC.
+version: 1.0
+file_type: group-administration
+name: Financial-sector cybercrime
+groups:
+  - { group_name: G0046, campaign: "", technique_id: all, enabled: true }   # FIN7
+  - { group_name: G0061, campaign: "", technique_id: all, enabled: true }   # FIN8
+  - { group_name: G0037, campaign: "", technique_id: all, enabled: true }   # FIN6
+  - { group_name: G0008, campaign: "", technique_id: all, enabled: true }   # Carbanak
+  - { group_name: G0032, campaign: "", technique_id: all, enabled: true }   # Lazarus Group (BeagleBoyz, banks/crypto)
+  - { group_name: G0097, campaign: "", technique_id: all, enabled: true }   # Bluenoroff (DPRK, crypto)
+  - { group_name: G1015, campaign: "", technique_id: all, enabled: true }   # Scattered Spider
+  - { group_name: G0119, campaign: "", technique_id: all, enabled: true }   # INDRIK SPIDER

@@ -2,11 +2,18 @@
 
 **Live demo:** https://dev-nobytes-io.github.io/Mitre-cti-log-to-detection/
 
-A static web app that lets you build a data-source inventory (like
-[DeTT&CT](https://github.com/rabobank-cdc/DeTTECT)) and generate an ATT&CK
-Navigator layer (like
-[Dettectinator](https://github.com/siriussecurity/dettectinator)) — all in
-the browser, no backend, no install.
+A static web app that walks you through five steps:
+
+1. **MITRE CTI** — load the ATT&CK STIX bundle (or a local file).
+2. **Log Inventory** — score the data sources / log feeds you collect.
+3. **Detections** — what you can detect, derived from your inventory.
+4. **Threats** — pick the threat-actor groups you care about.
+5. **Gap Analysis** — cross-reference the threats' techniques against
+   your detections to surface coverage gaps.
+
+Built like [DeTT&CT](https://github.com/rabobank-cdc/DeTTECT) +
+[Dettectinator](https://github.com/siriussecurity/dettectinator) but
+all in the browser — no install, no backend.
 
 It pulls ATT&CK STIX data straight from
 [github.com/mitre/cti](https://github.com/mitre/cti), maps your data
@@ -26,6 +33,26 @@ zero-install browser UI for the same flow:
 3. See which techniques you can detect, weighted by score and component
    coverage ratio.
 4. Export an ATT&CK Navigator layer JSON.
+
+## Sample data
+
+Every section has a *Samples* link or download you can use without
+typing anything. Pulled in from `samples/`:
+
+| Tab | File | What it is |
+|---|---|---|
+| MITRE CTI | `samples/stix-mini-bundle.json` | 24 KB synthetic STIX bundle — 6 data sources, 12 techniques, 5 groups. Loads instantly; great for kicking the tyres without the 30 MB enterprise bundle. |
+| Log Inventory | `samples/persona-mature-enterprise.yaml` | Enterprise SOC w/ Sysmon + EDR + Zeek — most things scored 3-5. |
+| Log Inventory | `samples/persona-cloud-saas.yaml` | Cloud-first SaaS — strong cloud + identity, dark on host telemetry. |
+| Log Inventory | `samples/persona-network-mssp.yaml` | Perimeter-only MSSP customer — strong network, zero host. |
+| Log Inventory | `samples/persona-greenfield-startup.yaml` | Just rolled out an EDR — useful as a "before" picture. |
+| Threats | `samples/threats.example.yaml` | Mixed sample (APT29 / 28 / 41, FIN7, Wizard Spider…). |
+| Threats | `samples/threats-ransomware.yaml` | Ransomware-affiliated crews. |
+| Threats | `samples/threats-state-apts.yaml` | State-aligned APTs. |
+| Threats | `samples/threats-financial.yaml` | Financially-motivated cybercrime. |
+
+Click a sample link inside the live app to download the file, then use
+the matching *Import* / *Upload* control on that tab.
 
 ## Run it
 

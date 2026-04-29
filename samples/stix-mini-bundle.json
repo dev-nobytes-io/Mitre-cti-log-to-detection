@@ -1,0 +1,891 @@
+{
+  "type": "bundle",
+  "id": "bundle--mini-demo-001",
+  "spec_version": "2.1",
+  "objects": [
+    {
+      "type": "x-mitre-tactic",
+      "id": "x-mitre-tactic--x-m-execution",
+      "name": "Execution",
+      "x_mitre_shortname": "execution",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "TA0100"
+        }
+      ]
+    },
+    {
+      "type": "x-mitre-tactic",
+      "id": "x-mitre-tactic--x-m-persistence",
+      "name": "Persistence",
+      "x_mitre_shortname": "persistence",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "TA0101"
+        }
+      ]
+    },
+    {
+      "type": "x-mitre-tactic",
+      "id": "x-mitre-tactic--x-m-defense-evasion",
+      "name": "Defense Evasion",
+      "x_mitre_shortname": "defense-evasion",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "TA0102"
+        }
+      ]
+    },
+    {
+      "type": "x-mitre-tactic",
+      "id": "x-mitre-tactic--x-m-credential-access",
+      "name": "Credential Access",
+      "x_mitre_shortname": "credential-access",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "TA0103"
+        }
+      ]
+    },
+    {
+      "type": "x-mitre-tactic",
+      "id": "x-mitre-tactic--x-m-discovery",
+      "name": "Discovery",
+      "x_mitre_shortname": "discovery",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "TA0104"
+        }
+      ]
+    },
+    {
+      "type": "x-mitre-tactic",
+      "id": "x-mitre-tactic--x-m-lateral-movement",
+      "name": "Lateral Movement",
+      "x_mitre_shortname": "lateral-movement",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "TA0105"
+        }
+      ]
+    },
+    {
+      "type": "x-mitre-data-source",
+      "id": "x-mitre-data-source--x-m-process",
+      "name": "Process",
+      "x_mitre_platforms": [
+        "Windows",
+        "Linux",
+        "macOS"
+      ],
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "DS006"
+        }
+      ]
+    },
+    {
+      "type": "x-mitre-data-component",
+      "id": "x-mitre-data-component--x-m-process-process-creation",
+      "name": "Process Creation",
+      "x_mitre_data_source_ref": "x-mitre-data-source--x-m-process"
+    },
+    {
+      "type": "x-mitre-data-component",
+      "id": "x-mitre-data-component--x-m-process-process-termination",
+      "name": "Process Termination",
+      "x_mitre_data_source_ref": "x-mitre-data-source--x-m-process"
+    },
+    {
+      "type": "x-mitre-data-component",
+      "id": "x-mitre-data-component--x-m-process-command-execution",
+      "name": "Command Execution",
+      "x_mitre_data_source_ref": "x-mitre-data-source--x-m-process"
+    },
+    {
+      "type": "x-mitre-data-source",
+      "id": "x-mitre-data-source--x-m-command",
+      "name": "Command",
+      "x_mitre_platforms": [
+        "Windows",
+        "Linux",
+        "macOS"
+      ],
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "DS0010"
+        }
+      ]
+    },
+    {
+      "type": "x-mitre-data-component",
+      "id": "x-mitre-data-component--x-m-command-command-execution",
+      "name": "Command Execution",
+      "x_mitre_data_source_ref": "x-mitre-data-source--x-m-command"
+    },
+    {
+      "type": "x-mitre-data-source",
+      "id": "x-mitre-data-source--x-m-file",
+      "name": "File",
+      "x_mitre_platforms": [
+        "Windows",
+        "Linux"
+      ],
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "DS0012"
+        }
+      ]
+    },
+    {
+      "type": "x-mitre-data-component",
+      "id": "x-mitre-data-component--x-m-file-file-creation",
+      "name": "File Creation",
+      "x_mitre_data_source_ref": "x-mitre-data-source--x-m-file"
+    },
+    {
+      "type": "x-mitre-data-component",
+      "id": "x-mitre-data-component--x-m-file-file-modification",
+      "name": "File Modification",
+      "x_mitre_data_source_ref": "x-mitre-data-source--x-m-file"
+    },
+    {
+      "type": "x-mitre-data-source",
+      "id": "x-mitre-data-source--x-m-network-traffic",
+      "name": "Network Traffic",
+      "x_mitre_platforms": [
+        "Windows",
+        "Linux",
+        "Network"
+      ],
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "DS0015"
+        }
+      ]
+    },
+    {
+      "type": "x-mitre-data-component",
+      "id": "x-mitre-data-component--x-m-network-traffic-network-connection-creation",
+      "name": "Network Connection Creation",
+      "x_mitre_data_source_ref": "x-mitre-data-source--x-m-network-traffic"
+    },
+    {
+      "type": "x-mitre-data-component",
+      "id": "x-mitre-data-component--x-m-network-traffic-network-traffic-flow",
+      "name": "Network Traffic Flow",
+      "x_mitre_data_source_ref": "x-mitre-data-source--x-m-network-traffic"
+    },
+    {
+      "type": "x-mitre-data-source",
+      "id": "x-mitre-data-source--x-m-logon-session",
+      "name": "Logon Session",
+      "x_mitre_platforms": [
+        "Windows",
+        "Linux",
+        "macOS",
+        "SaaS"
+      ],
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "DS0018"
+        }
+      ]
+    },
+    {
+      "type": "x-mitre-data-component",
+      "id": "x-mitre-data-component--x-m-logon-session-logon-session-creation",
+      "name": "Logon Session Creation",
+      "x_mitre_data_source_ref": "x-mitre-data-source--x-m-logon-session"
+    },
+    {
+      "type": "x-mitre-data-source",
+      "id": "x-mitre-data-source--x-m-cloud-service",
+      "name": "Cloud Service",
+      "x_mitre_platforms": [
+        "IaaS",
+        "SaaS",
+        "Office 365"
+      ],
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "DS0020"
+        }
+      ]
+    },
+    {
+      "type": "x-mitre-data-component",
+      "id": "x-mitre-data-component--x-m-cloud-service-cloud-service-enumeration",
+      "name": "Cloud Service Enumeration",
+      "x_mitre_data_source_ref": "x-mitre-data-source--x-m-cloud-service"
+    },
+    {
+      "type": "x-mitre-data-component",
+      "id": "x-mitre-data-component--x-m-cloud-service-cloud-service-modification",
+      "name": "Cloud Service Modification",
+      "x_mitre_data_source_ref": "x-mitre-data-source--x-m-cloud-service"
+    },
+    {
+      "type": "attack-pattern",
+      "id": "attack-pattern--att-T1059",
+      "name": "Command and Scripting Interpreter",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1059"
+        }
+      ],
+      "kill_chain_phases": [
+        {
+          "kill_chain_name": "mitre-attack",
+          "phase_name": "execution"
+        }
+      ],
+      "x_mitre_platforms": [
+        "Windows",
+        "Linux",
+        "macOS"
+      ]
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-d-0",
+      "relationship_type": "detects",
+      "source_ref": "x-mitre-data-component--x-m-process-process-creation",
+      "target_ref": "attack-pattern--att-T1059"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-d-1",
+      "relationship_type": "detects",
+      "source_ref": "x-mitre-data-component--x-m-command-command-execution",
+      "target_ref": "attack-pattern--att-T1059"
+    },
+    {
+      "type": "attack-pattern",
+      "id": "attack-pattern--att-T1053",
+      "name": "Scheduled Task/Job",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1053"
+        }
+      ],
+      "kill_chain_phases": [
+        {
+          "kill_chain_name": "mitre-attack",
+          "phase_name": "execution"
+        }
+      ],
+      "x_mitre_platforms": [
+        "Windows",
+        "Linux"
+      ]
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-d-2",
+      "relationship_type": "detects",
+      "source_ref": "x-mitre-data-component--x-m-process-process-creation",
+      "target_ref": "attack-pattern--att-T1053"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-d-3",
+      "relationship_type": "detects",
+      "source_ref": "x-mitre-data-component--x-m-file-file-creation",
+      "target_ref": "attack-pattern--att-T1053"
+    },
+    {
+      "type": "attack-pattern",
+      "id": "attack-pattern--att-T1547",
+      "name": "Boot or Logon Autostart Execution",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1547"
+        }
+      ],
+      "kill_chain_phases": [
+        {
+          "kill_chain_name": "mitre-attack",
+          "phase_name": "persistence"
+        }
+      ],
+      "x_mitre_platforms": [
+        "Windows"
+      ]
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-d-4",
+      "relationship_type": "detects",
+      "source_ref": "x-mitre-data-component--x-m-file-file-modification",
+      "target_ref": "attack-pattern--att-T1547"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-d-5",
+      "relationship_type": "detects",
+      "source_ref": "x-mitre-data-component--x-m-file-file-creation",
+      "target_ref": "attack-pattern--att-T1547"
+    },
+    {
+      "type": "attack-pattern",
+      "id": "attack-pattern--att-T1078",
+      "name": "Valid Accounts",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1078"
+        }
+      ],
+      "kill_chain_phases": [
+        {
+          "kill_chain_name": "mitre-attack",
+          "phase_name": "persistence"
+        }
+      ],
+      "x_mitre_platforms": [
+        "Windows",
+        "Linux",
+        "macOS",
+        "SaaS"
+      ]
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-d-6",
+      "relationship_type": "detects",
+      "source_ref": "x-mitre-data-component--x-m-logon-session-logon-session-creation",
+      "target_ref": "attack-pattern--att-T1078"
+    },
+    {
+      "type": "attack-pattern",
+      "id": "attack-pattern--att-T1027",
+      "name": "Obfuscated Files or Information",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1027"
+        }
+      ],
+      "kill_chain_phases": [
+        {
+          "kill_chain_name": "mitre-attack",
+          "phase_name": "defense-evasion"
+        }
+      ],
+      "x_mitre_platforms": [
+        "Windows",
+        "Linux"
+      ]
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-d-7",
+      "relationship_type": "detects",
+      "source_ref": "x-mitre-data-component--x-m-file-file-creation",
+      "target_ref": "attack-pattern--att-T1027"
+    },
+    {
+      "type": "attack-pattern",
+      "id": "attack-pattern--att-T1003",
+      "name": "OS Credential Dumping",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1003"
+        }
+      ],
+      "kill_chain_phases": [
+        {
+          "kill_chain_name": "mitre-attack",
+          "phase_name": "credential-access"
+        }
+      ],
+      "x_mitre_platforms": [
+        "Windows",
+        "Linux"
+      ]
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-d-8",
+      "relationship_type": "detects",
+      "source_ref": "x-mitre-data-component--x-m-process-process-creation",
+      "target_ref": "attack-pattern--att-T1003"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-d-9",
+      "relationship_type": "detects",
+      "source_ref": "x-mitre-data-component--x-m-command-command-execution",
+      "target_ref": "attack-pattern--att-T1003"
+    },
+    {
+      "type": "attack-pattern",
+      "id": "attack-pattern--att-T1110",
+      "name": "Brute Force",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1110"
+        }
+      ],
+      "kill_chain_phases": [
+        {
+          "kill_chain_name": "mitre-attack",
+          "phase_name": "credential-access"
+        }
+      ],
+      "x_mitre_platforms": [
+        "Windows",
+        "Linux",
+        "SaaS"
+      ]
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-d-10",
+      "relationship_type": "detects",
+      "source_ref": "x-mitre-data-component--x-m-logon-session-logon-session-creation",
+      "target_ref": "attack-pattern--att-T1110"
+    },
+    {
+      "type": "attack-pattern",
+      "id": "attack-pattern--att-T1018",
+      "name": "Remote System Discovery",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1018"
+        }
+      ],
+      "kill_chain_phases": [
+        {
+          "kill_chain_name": "mitre-attack",
+          "phase_name": "discovery"
+        }
+      ],
+      "x_mitre_platforms": [
+        "Windows",
+        "Linux"
+      ]
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-d-11",
+      "relationship_type": "detects",
+      "source_ref": "x-mitre-data-component--x-m-network-traffic-network-connection-creation",
+      "target_ref": "attack-pattern--att-T1018"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-d-12",
+      "relationship_type": "detects",
+      "source_ref": "x-mitre-data-component--x-m-process-process-creation",
+      "target_ref": "attack-pattern--att-T1018"
+    },
+    {
+      "type": "attack-pattern",
+      "id": "attack-pattern--att-T1046",
+      "name": "Network Service Discovery",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1046"
+        }
+      ],
+      "kill_chain_phases": [
+        {
+          "kill_chain_name": "mitre-attack",
+          "phase_name": "discovery"
+        }
+      ],
+      "x_mitre_platforms": [
+        "Windows",
+        "Linux"
+      ]
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-d-13",
+      "relationship_type": "detects",
+      "source_ref": "x-mitre-data-component--x-m-network-traffic-network-connection-creation",
+      "target_ref": "attack-pattern--att-T1046"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-d-14",
+      "relationship_type": "detects",
+      "source_ref": "x-mitre-data-component--x-m-network-traffic-network-traffic-flow",
+      "target_ref": "attack-pattern--att-T1046"
+    },
+    {
+      "type": "attack-pattern",
+      "id": "attack-pattern--att-T1021",
+      "name": "Remote Services",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1021"
+        }
+      ],
+      "kill_chain_phases": [
+        {
+          "kill_chain_name": "mitre-attack",
+          "phase_name": "lateral-movement"
+        }
+      ],
+      "x_mitre_platforms": [
+        "Windows",
+        "Linux"
+      ]
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-d-15",
+      "relationship_type": "detects",
+      "source_ref": "x-mitre-data-component--x-m-network-traffic-network-connection-creation",
+      "target_ref": "attack-pattern--att-T1021"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-d-16",
+      "relationship_type": "detects",
+      "source_ref": "x-mitre-data-component--x-m-logon-session-logon-session-creation",
+      "target_ref": "attack-pattern--att-T1021"
+    },
+    {
+      "type": "attack-pattern",
+      "id": "attack-pattern--att-T1526",
+      "name": "Cloud Service Discovery",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1526"
+        }
+      ],
+      "kill_chain_phases": [
+        {
+          "kill_chain_name": "mitre-attack",
+          "phase_name": "discovery"
+        }
+      ],
+      "x_mitre_platforms": [
+        "IaaS",
+        "SaaS"
+      ]
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-d-17",
+      "relationship_type": "detects",
+      "source_ref": "x-mitre-data-component--x-m-cloud-service-cloud-service-enumeration",
+      "target_ref": "attack-pattern--att-T1526"
+    },
+    {
+      "type": "attack-pattern",
+      "id": "attack-pattern--att-T1098",
+      "name": "Account Manipulation",
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "T1098"
+        }
+      ],
+      "kill_chain_phases": [
+        {
+          "kill_chain_name": "mitre-attack",
+          "phase_name": "persistence"
+        }
+      ],
+      "x_mitre_platforms": [
+        "IaaS",
+        "SaaS",
+        "Windows"
+      ]
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-d-18",
+      "relationship_type": "detects",
+      "source_ref": "x-mitre-data-component--x-m-cloud-service-cloud-service-modification",
+      "target_ref": "attack-pattern--att-T1098"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-d-19",
+      "relationship_type": "detects",
+      "source_ref": "x-mitre-data-component--x-m-logon-session-logon-session-creation",
+      "target_ref": "attack-pattern--att-T1098"
+    },
+    {
+      "type": "intrusion-set",
+      "id": "intrusion-set--int-G0016",
+      "name": "APT29",
+      "aliases": [
+        "APT29",
+        "Cozy Bear"
+      ],
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "G0016"
+        }
+      ]
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-0",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0016",
+      "target_ref": "attack-pattern--att-T1059"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-1",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0016",
+      "target_ref": "attack-pattern--att-T1078"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-2",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0016",
+      "target_ref": "attack-pattern--att-T1110"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-3",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0016",
+      "target_ref": "attack-pattern--att-T1018"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-4",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0016",
+      "target_ref": "attack-pattern--att-T1098"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-5",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0016",
+      "target_ref": "attack-pattern--att-T1526"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-6",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0016",
+      "target_ref": "attack-pattern--att-T1027"
+    },
+    {
+      "type": "intrusion-set",
+      "id": "intrusion-set--int-G0007",
+      "name": "APT28",
+      "aliases": [
+        "APT28",
+        "Fancy Bear"
+      ],
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "G0007"
+        }
+      ]
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-7",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0007",
+      "target_ref": "attack-pattern--att-T1059"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-8",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0007",
+      "target_ref": "attack-pattern--att-T1003"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-9",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0007",
+      "target_ref": "attack-pattern--att-T1078"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-10",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0007",
+      "target_ref": "attack-pattern--att-T1110"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-11",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0007",
+      "target_ref": "attack-pattern--att-T1547"
+    },
+    {
+      "type": "intrusion-set",
+      "id": "intrusion-set--int-G0046",
+      "name": "FIN7",
+      "aliases": [
+        "FIN7"
+      ],
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "G0046"
+        }
+      ]
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-12",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0046",
+      "target_ref": "attack-pattern--att-T1059"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-13",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0046",
+      "target_ref": "attack-pattern--att-T1003"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-14",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0046",
+      "target_ref": "attack-pattern--att-T1027"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-15",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0046",
+      "target_ref": "attack-pattern--att-T1018"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-16",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0046",
+      "target_ref": "attack-pattern--att-T1078"
+    },
+    {
+      "type": "intrusion-set",
+      "id": "intrusion-set--int-G0096",
+      "name": "APT41",
+      "aliases": [
+        "APT41"
+      ],
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "G0096"
+        }
+      ]
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-17",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0096",
+      "target_ref": "attack-pattern--att-T1059"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-18",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0096",
+      "target_ref": "attack-pattern--att-T1078"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-19",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0096",
+      "target_ref": "attack-pattern--att-T1027"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-20",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0096",
+      "target_ref": "attack-pattern--att-T1021"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-21",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0096",
+      "target_ref": "attack-pattern--att-T1110"
+    },
+    {
+      "type": "intrusion-set",
+      "id": "intrusion-set--int-G0034",
+      "name": "Sandworm Team",
+      "aliases": [
+        "Sandworm Team"
+      ],
+      "external_references": [
+        {
+          "source_name": "mitre-attack",
+          "external_id": "G0034"
+        }
+      ]
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-22",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0034",
+      "target_ref": "attack-pattern--att-T1059"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-23",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0034",
+      "target_ref": "attack-pattern--att-T1547"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-24",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0034",
+      "target_ref": "attack-pattern--att-T1018"
+    },
+    {
+      "type": "relationship",
+      "id": "relationship--rel-u-25",
+      "relationship_type": "uses",
+      "source_ref": "intrusion-set--int-G0034",
+      "target_ref": "attack-pattern--att-T1003"
+    }
+  ]
+}
