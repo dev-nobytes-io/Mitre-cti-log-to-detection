@@ -103,7 +103,30 @@ official STIX `detects` relationships). For each technique we compute:
 The technique table shows everything filterable by tactic, name, and
 coverage class.
 
-### 4. Relationships
+### 4. Threats (gap analysis)
+
+Pulls MITRE ATT&CK threat-actor groups (`intrusion-set` STIX objects)
+out of the same bundle. Tick one or more (e.g. APT29, FIN7) and the
+app cross-references the techniques those groups use against your
+data-source coverage to surface:
+
+- **Covered** — group uses it and you'd detect it.
+- **Partial** — you have some of the detecting components.
+- **Gap** — group uses it and you have zero coverage.
+- **Undetectable** — ATT&CK has no `detects` relationships for it; no
+  data-source telemetry maps to it at all (a known blind zone).
+
+Two Navigator-layer exports:
+
+- **Threat-groups overlay** — score = number of selected groups using
+  each technique.
+- **Gap layer** — score = `groups × (1 − coverage_ratio)`; high score
+  = bigger detection gap.
+
+The group selection imports / exports as DeTT&CT-style
+`group-administration` YAML — see `samples/threats.example.yaml`.
+
+### 5. Relationships
 
 A dedicated tab visualizes the data flow with [Mermaid](https://mermaid.js.org/)
 diagrams:
@@ -126,7 +149,7 @@ diagrams:
 - **Coverage overview** — top data sources ranked by detection breadth, with
   a bar showing covered / total techniques.
 
-### 5. Export
+### 6. Export
 
 Generates a [Navigator layer 4.5](https://github.com/mitre-attack/attack-navigator/blob/master/layers/LAYERFORMATv4_5.md)
 JSON. Open Navigator → *Open Existing Layer* → *Upload from local* and you

@@ -101,7 +101,9 @@ function indexBundle(bundle, meta) {
   const dataComponents = [];  // x-mitre-data-component
   const techniques = [];      // attack-pattern (active)
   const tactics = [];         // x-mitre-tactic
+  const intrusionSets = [];   // intrusion-set (threat-actor groups)
   const detectsRels = [];     // relationship type=detects
+  const usesRels = [];        // relationship type=uses (group/software -> technique)
 
   for (const o of objects) {
     if (o.x_mitre_deprecated || o.revoked) continue;
@@ -110,8 +112,10 @@ function indexBundle(bundle, meta) {
       case "x-mitre-data-component": dataComponents.push(o); break;
       case "attack-pattern": techniques.push(o); break;
       case "x-mitre-tactic": tactics.push(o); break;
+      case "intrusion-set": intrusionSets.push(o); break;
       case "relationship":
         if (o.relationship_type === "detects") detectsRels.push(o);
+        else if (o.relationship_type === "uses") usesRels.push(o);
         break;
     }
   }
@@ -197,6 +201,30 @@ function indexBundle(bundle, meta) {
     description: t.description || "",
   })).sort((a, b) => a.name.localeCompare(b.name));
 
+  // Build group -> techniques (uses relationships where source=intrusion-set, target=attack-pattern)
+  const techniqueIdSet = new Set(techniques.map(t => t.id));
+  const groupTechniques = new Map();      // groupId -> Set(techniqueId)
+  const techniqueGroups = new Map();      // techniqueId -> Set(groupId)
+  for (const r of usesRels) {
+    if (!techniqueIdSet.has(r.target_ref)) continue;
+    const src = byId.get(r.source_ref);
+    if (!src || src.type !== "intrusion-set") continue;
+    if (!groupTechniques.has(r.source_ref)) groupTechniques.set(r.source_ref, new Set());
+    groupTechniques.get(r.source_ref).add(r.target_ref);
+    if (!techniqueGroups.has(r.target_ref)) techniqueGroups.set(r.target_ref, new Set());
+    techniqueGroups.get(r.target_ref).add(r.source_ref);
+  }
+
+  const groupList = intrusionSets.map(g => ({
+    id: g.id,
+    stixId: g.id,
+    attackId: externalAttackId(g),
+    name: g.name,
+    aliases: (g.aliases || []).filter(a => a !== g.name),
+    description: g.description || "",
+    techniqueIds: Array.from(groupTechniques.get(g.id) || []),
+  })).filter(g => g.attackId).sort((a, b) => a.name.localeCompare(b.name));
+
   // Collect unique platforms across data sources
   const platforms = new Set();
   for (const ds of dataSourceList) ds.platforms.forEach(p => platforms.add(p));
@@ -211,6 +239,7 @@ function indexBundle(bundle, meta) {
     dataComponents: dataSourceList.flatMap(ds => ds.components),
     techniques: techniqueList,
     tactics: tacticList,
+    groups: groupList,
     platforms: Array.from(platforms).sort(),
     // lookup helpers
     byId,
@@ -218,5 +247,8 @@ function indexBundle(bundle, meta) {
     techniqueById: new Map(techniqueList.map(t => [t.id, t])),
     techniqueByAttackId: new Map(techniqueList.map(t => [t.attackId, t])),
     dataSourceById: new Map(dataSourceList.map(ds => [ds.id, ds])),
+    groupById: new Map(groupList.map(g => [g.id, g])),
+    groupByAttackId: new Map(groupList.map(g => [g.attackId, g])),
+    techniqueGroups, // techniqueId -> Set(groupId)
   };
 }

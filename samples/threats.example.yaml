@@ -1,0 +1,18 @@
+# Sample threat-group selection (DeTT&CT group-administration v1.0 schema).
+# Import this on the Threats tab to overlay the techniques used by these
+# groups against your data-source coverage.
+#
+# Group IDs are MITRE ATT&CK group IDs (G####). Names also work as a
+# fallback. Aliases (e.g. "Cozy Bear" for APT29) are accepted.
+version: 1.0
+file_type: group-administration
+name: Cybercrime + state-aligned sample
+groups:
+  - { group_name: G0016, campaign: "",  technique_id: all, enabled: true }   # APT29 (Cozy Bear)
+  - { group_name: G0007, campaign: "",  technique_id: all, enabled: true }   # APT28 (Fancy Bear)
+  - { group_name: G0046, campaign: "",  technique_id: all, enabled: true }   # FIN7
+  - { group_name: G0096, campaign: "",  technique_id: all, enabled: true }   # APT41
+  - { group_name: G0102, campaign: "",  technique_id: all, enabled: true }   # Wizard Spider
+  - { group_name: G0008, campaign: "",  technique_id: all, enabled: true }   # Carbanak
+  - { group_name: G0035, campaign: "",  technique_id: all, enabled: true }   # Dragonfly
+  - { group_name: G0050, campaign: "",  technique_id: all, enabled: true }   # APT32
