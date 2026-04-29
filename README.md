@@ -1,5 +1,7 @@
 # ATT&CK Data Source Inventory
 
+**Live demo:** https://dev-nobytes-io.github.io/Mitre-cti-log-to-detection/
+
 A static web app that lets you build a data-source inventory (like
 [DeTT&CT](https://github.com/rabobank-cdc/DeTTECT)) and generate an ATT&CK
 Navigator layer (like
