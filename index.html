@@ -13,7 +13,7 @@
   <header class="topbar">
     <div class="brand">
       <h1>ATT&amp;CK Data Source Inventory</h1>
-      <p class="subtitle">MITRE CTI &rarr; log inventory &rarr; detections &rarr; threats &rarr; gap analysis</p>
+      <p class="subtitle">MITRE CTI &rarr; log inventory &rarr; data components &rarr; detection strategies &rarr; threats &rarr; coverage</p>
     </div>
     <div class="status" id="status">
       <span id="statusText">Ready</span>
@@ -21,22 +21,22 @@
   </header>
 
   <nav class="tabs" role="tablist">
-    <button class="tab active" data-tab="setup" role="tab">1. MITRE CTI</button>
+    <button class="tab active" data-tab="setup" role="tab">1. MITRE CTI Data</button>
     <button class="tab" data-tab="inventory" role="tab">2. Log Inventory</button>
     <button class="tab" data-tab="components" role="tab">3. Data Components</button>
     <button class="tab" data-tab="coverage" role="tab">4. Detection Strategies</button>
     <button class="tab" data-tab="threats" role="tab">5. Threats</button>
-    <button class="tab" data-tab="gaps" role="tab">6. Coverage vs Threats</button>
+    <button class="tab" data-tab="gaps" role="tab">6. Coverage</button>
     <button class="tab" data-tab="graph" role="tab">Diagrams</button>
     <button class="tab" data-tab="export" role="tab">Export</button>
   </nav>
   <select class="tabs-mobile" id="tabsMobile" aria-label="Section">
-    <option value="setup">1. MITRE CTI</option>
+    <option value="setup">1. MITRE CTI Data</option>
     <option value="inventory">2. Log Inventory</option>
     <option value="components">3. Data Components</option>
     <option value="coverage">4. Detection Strategies</option>
     <option value="threats">5. Threats</option>
-    <option value="gaps">6. Coverage vs Threats</option>
+    <option value="gaps">6. Coverage</option>
     <option value="graph">Diagrams</option>
     <option value="export">Export</option>
   </select>
@@ -44,7 +44,7 @@
 
   <main>
     <section class="panel active" id="tab-setup" role="tabpanel">
-      <h2>1. MITRE CTI</h2>
+      <h2>1. MITRE CTI Data</h2>
       <p>Pulls the latest <code>enterprise-attack.json</code> from <a href="https://github.com/mitre/cti" target="_blank" rel="noopener">github.com/mitre/cti</a>. Cached in your browser (IndexedDB) after the first load.</p>
       <div class="row">
         <label>Domain
@@ -169,7 +169,7 @@
     </section>
 
     <section class="panel" id="tab-gaps" role="tabpanel">
-      <h2>6. Coverage vs threats</h2>
+      <h2>6. Coverage</h2>
       <p>Cross-references the techniques used by the threat groups you picked against your detection strategies. Gaps are techniques those groups use that your data sources can't catch.</p>
       <div class="stats" id="threatStats"></div>
       <div class="row">
