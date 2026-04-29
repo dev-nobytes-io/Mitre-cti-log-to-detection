@@ -1,0 +1,145 @@
+# ATT&CK Data Source Inventory
+
+A static web app that lets you build a data-source inventory (like
+[DeTT&CT](https://github.com/rabobank-cdc/DeTTECT)) and generate an ATT&CK
+Navigator layer (like
+[Dettectinator](https://github.com/siriussecurity/dettectinator)) — all in
+the browser, no backend, no install.
+
+It pulls ATT&CK STIX data straight from
+[github.com/mitre/cti](https://github.com/mitre/cti), maps your data
+components to techniques via the official STIX `detects` relationships, and
+emits a Navigator layer JSON you can drop into the
+[ATT&CK Navigator](https://mitre-attack.github.io/attack-navigator/).
+
+## Why another tool?
+
+DeTT&CT is great but is a Python CLI that ships an Excel-driven workflow.
+Dettectinator generates Navigator layers from various detection sources but
+also runs as a CLI / library. This app is a 5-minute,
+zero-install browser UI for the same flow:
+
+1. Load ATT&CK (cached in IndexedDB after the first fetch).
+2. Score each data source / component (0–5) for collection quality.
+3. See which techniques you can detect, weighted by score and component
+   coverage ratio.
+4. Export an ATT&CK Navigator layer JSON.
+
+## Run it
+
+It's a fully static site. Open `index.html` over `http://` (file:// will
+break ES modules and `fetch`). Any static server works:
+
+```
+python3 -m http.server 8080
+# or
+npx serve .
+```
+
+Then open http://localhost:8080.
+
+## Workflow
+
+### 1. Load ATT&CK
+
+On the **Load ATT&CK** tab, pick a domain (`enterprise-attack`,
+`mobile-attack`, `ics-attack`) and click *Load / Refresh*. The bundle is
+fetched from `https://raw.githubusercontent.com/mitre/cti/master/<domain>/<domain>.json`
+and cached in IndexedDB so subsequent visits are instant.
+
+You can also drop a local STIX bundle JSON via *Load local STIX file* —
+useful for offline use or for pinning to a specific ATT&CK version.
+
+### 2. Inventory
+
+For every ATT&CK data source you have a *visibility score* (0–5). Component
+overrides let you say "I have great Process Creation but only fair Process
+Access." The inventory persists in `localStorage`.
+
+You can import / export the inventory as YAML or JSON. The YAML schema is
+the same as DeTT&CT's `data-source-administration` file (v1.2), so existing
+DeTT&CT YAMLs should round-trip. See `samples/inventory.example.yaml`.
+
+### 3. Coverage
+
+Each technique has zero or more data components that detect it (per the
+official STIX `detects` relationships). For each technique we compute:
+
+- **Coverage ratio**: covered detecting components / total detecting
+  components (0..1).
+- **Max source score**: best score across components that cover it (0..5).
+- **Weighted score**: `max_score × ratio` (0..5, fractional).
+
+The technique table shows everything filterable by tactic, name, and
+coverage class.
+
+### 4. Relationships
+
+A dedicated tab visualizes the data flow with [Mermaid](https://mermaid.js.org/)
+diagrams:
+
+- **Conceptual model** — how a raw log becomes a Navigator score (always
+  shown).
+
+  ```mermaid
+  flowchart LR
+    log[/"Raw log"/] --> src["Data Source"]
+    src --> cmp["Data Component"]
+    cmp -->|detects| tech["Technique"] --> tac["Tactic"]
+    tech -. weighted by score .-> nav[("Navigator layer")]
+  ```
+
+- **Per-source drill-down** — pick a data source to see its components and
+  every technique they detect, colored by your visibility score.
+- **Per-technique view** — search for a technique to see which data
+  components detect it (and which of yours cover them).
+- **Coverage overview** — top data sources ranked by detection breadth, with
+  a bar showing covered / total techniques.
+
+### 5. Export
+
+Generates a [Navigator layer 4.5](https://github.com/mitre-attack/attack-navigator/blob/master/layers/LAYERFORMATv4_5.md)
+JSON. Open Navigator → *Open Existing Layer* → *Upload from local* and you
+get a colored heat map of your detection coverage across the matrix.
+
+Every technique entry includes metadata (component coverage ratio, max
+score, list of covering components) that Navigator surfaces on hover.
+
+## Mapping logic — the short version
+
+```
+data source ──has─▶ data component ──detects─▶ technique
+                          │
+                       (your visibility score)
+```
+
+- ATT&CK data source = an information *category* (e.g., "Process").
+- ATT&CK data component = a sub-event of that source (e.g., "Process
+  Creation"). Components are what STIX `detects` relationships actually
+  point at.
+- Your inventory scores at the source level, with optional per-component
+  overrides. The app resolves the effective score for each component, then
+  scores each technique based on which of its detecting components you
+  have.
+
+## Files
+
+```
+index.html                 # UI shell
+css/styles.css             # styles
+js/app.js                  # UI controller
+js/attack.js               # STIX bundle loader + indexer (uses IndexedDB cache)
+js/inventory.js            # inventory state + YAML/JSON import/export
+js/coverage.js             # technique coverage computation
+js/diagrams.js             # mermaid diagram generators
+js/navigator.js            # Navigator layer JSON builder
+samples/inventory.example.yaml
+```
+
+## Acknowledgements
+
+- MITRE ATT&CK® data — © The MITRE Corporation. ATT&CK® is a registered
+  trademark of The MITRE Corporation.
+- Inspired by [DeTT&CT](https://github.com/rabobank-cdc/DeTTECT) and
+  [Dettectinator](https://github.com/siriussecurity/dettectinator).
+- YAML parsing via [js-yaml](https://github.com/nodeca/js-yaml).

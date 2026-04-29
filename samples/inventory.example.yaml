@@ -1,0 +1,59 @@
+version: 1.2
+file_type: data-source-administration
+name: Example inventory
+systems:
+  - applicable_to: all
+    description: Default system
+data_sources:
+  - data_source_name: Process
+    applicable_to: ["all"]
+    date_registered: 2024-01-15
+    date_connected: 2024-01-15
+    available_for_data_analytics: true
+    comment: EDR coverage on all servers and workstations
+    score: 4
+    data_quality:
+      device_completeness: 4
+      data_field_completeness: 4
+      timeliness: 5
+      consistency: 4
+      retention: 3
+    data_source:
+      - { name: Process Creation, score: 5, comment: "Sysmon Event ID 1" }
+      - { name: Process Termination, score: 3, comment: "Sysmon Event ID 5" }
+      - { name: Process Access, score: 2, comment: "Limited (Sysmon EID 10 selectively)" }
+      - { name: Process Metadata, score: 3, comment: "" }
+
+  - data_source_name: Command
+    applicable_to: ["all"]
+    date_registered: 2024-01-15
+    date_connected: 2024-01-15
+    available_for_data_analytics: true
+    score: 4
+    data_quality: { device_completeness: 4, data_field_completeness: 4, timeliness: 4, consistency: 4, retention: 3 }
+    data_source:
+      - { name: Command Execution, score: 5, comment: "PowerShell ScriptBlock + cmd auditing" }
+
+  - data_source_name: File
+    applicable_to: ["all"]
+    score: 3
+    data_quality: { device_completeness: 3, data_field_completeness: 3, timeliness: 3, consistency: 3, retention: 3 }
+    data_source:
+      - { name: File Creation, score: 3, comment: "Sysmon EID 11" }
+      - { name: File Modification, score: 2, comment: "Selective folders only" }
+      - { name: File Deletion, score: 1, comment: "Not collected at scale" }
+
+  - data_source_name: Network Traffic
+    applicable_to: ["all"]
+    score: 3
+    data_quality: { device_completeness: 3, data_field_completeness: 3, timeliness: 4, consistency: 3, retention: 2 }
+    data_source:
+      - { name: Network Connection Creation, score: 4, comment: "Zeek conn.log" }
+      - { name: Network Traffic Flow, score: 3, comment: "" }
+      - { name: Network Traffic Content, score: 1, comment: "Only for HTTP via proxy" }
+
+  - data_source_name: Logon Session
+    applicable_to: ["all"]
+    score: 4
+    data_quality: { device_completeness: 4, data_field_completeness: 4, timeliness: 4, consistency: 4, retention: 4 }
+    data_source: []
