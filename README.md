@@ -38,6 +38,23 @@ npx serve .
 
 Then open http://localhost:8080.
 
+## Live demo
+
+This repo ships a GitHub Actions workflow
+([`.github/workflows/pages.yml`](.github/workflows/pages.yml)) that
+publishes the site to GitHub Pages on every push to `main`.
+
+To enable it on a fork:
+
+1. **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+2. Push to `main` (or run the workflow manually under the *Actions* tab).
+3. The deployed URL appears in the workflow's *deployment* step output —
+   typically `https://<owner>.github.io/<repo>/`.
+
+The site is fully static (relative paths, HTTPS-only deps) so it also
+deploys cleanly to Cloudflare Pages, Netlify, or Vercel by pointing the
+provider at this repo with no build command.
+
 ## Workflow
 
 ### 1. Load ATT&CK
