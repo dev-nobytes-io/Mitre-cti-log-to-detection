@@ -1,0 +1,40 @@
+name: E2E tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install Playwright
+        run: npm install --no-save playwright@1.56.1
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-pw-1.56.1
+
+      - name: Install Chromium for Playwright
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E suite
+        # The harness uses /opt/pw-browsers/... when present (dev sandbox),
+        # otherwise falls back to playwright's own resolved binary.
+        run: node tests/run.mjs
