@@ -1,0 +1,17 @@
+# Threat-group selection: ransomware-affiliated crews
+# ------------------------------------------------------------------
+# Use this on the Threats tab if your priority is anti-ransomware
+# detection coverage. Mostly financially-motivated big-game-hunting
+# groups associated with public ransomware brands.
+version: 1.0
+file_type: group-administration
+name: Ransomware-affiliated crews
+groups:
+  - { group_name: G0102, campaign: "", technique_id: all, enabled: true }   # Wizard Spider (Conti, Ryuk)
+  - { group_name: G0046, campaign: "", technique_id: all, enabled: true }   # FIN7
+  - { group_name: G0008, campaign: "", technique_id: all, enabled: true }   # Carbanak
+  - { group_name: G1015, campaign: "", technique_id: all, enabled: true }   # Scattered Spider
+  - { group_name: G0119, campaign: "", technique_id: all, enabled: true }   # INDRIK SPIDER (Evil Corp)
+  - { group_name: G1003, campaign: "", technique_id: all, enabled: true }   # Ember Bear
+  - { group_name: G1006, campaign: "", technique_id: all, enabled: true }   # Earth Lusca
+  - { group_name: G0114, campaign: "", technique_id: all, enabled: true }   # Chimera

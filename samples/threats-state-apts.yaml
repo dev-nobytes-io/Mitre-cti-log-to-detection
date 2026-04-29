@@ -1,0 +1,18 @@
+# Threat-group selection: state-aligned APT crews
+# ------------------------------------------------------------------
+# Heavyweight nation-state groups. Use this profile if your threat
+# model is espionage / supply-chain / long-dwell intrusion rather
+# than smash-and-grab ransomware.
+version: 1.0
+file_type: group-administration
+name: State-aligned APTs
+groups:
+  - { group_name: G0016, campaign: "", technique_id: all, enabled: true }   # APT29 (Cozy Bear, Russia/SVR)
+  - { group_name: G0007, campaign: "", technique_id: all, enabled: true }   # APT28 (Fancy Bear, Russia/GRU)
+  - { group_name: G0034, campaign: "", technique_id: all, enabled: true }   # Sandworm Team (Russia/GRU 74455)
+  - { group_name: G0096, campaign: "", technique_id: all, enabled: true }   # APT41 (China)
+  - { group_name: G0050, campaign: "", technique_id: all, enabled: true }   # APT32 (Vietnam / OceanLotus)
+  - { group_name: G0035, campaign: "", technique_id: all, enabled: true }   # Dragonfly (Energetic Bear)
+  - { group_name: G0064, campaign: "", technique_id: all, enabled: true }   # APT33 (Iran)
+  - { group_name: G0094, campaign: "", technique_id: all, enabled: true }   # Kimsuky (DPRK)
+  - { group_name: G0032, campaign: "", technique_id: all, enabled: true }   # Lazarus Group (DPRK)
