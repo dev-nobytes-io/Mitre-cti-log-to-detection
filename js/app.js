@@ -1,4 +1,4 @@
-import { loadAttack, loadAttackFromBundle, clearAttackCache } from "./attack.js";
+import { loadAttack, loadAttackFromBundle, clearAttackCache, loadOfflineBundle } from "./attack.js";
 import {
   loadInventory, saveInventory, resetInventory,
   effectiveComponentScores, setSourceScore, setComponentScore, setAllSources,
@@ -139,8 +139,22 @@ async function runLoad({ domain, url, force }) {
     state.attack = await loadAttack({ domain, url, force, onProgress: p => setStatus(p.message, "busy") });
     onAttackLoaded(state.attack.meta.source);
   } catch (e) {
-    console.error(e);
-    setStatus(`Load failed: ${e.message}`, "error");
+    console.error("MITRE CTI fetch failed", e);
+    setStatus(`MITRE CTI fetch failed: ${e.message}. Falling back to bundled offline ATT&CK.`, "error");
+    setBanner(
+      `<strong>Network fetch from github.com/mitre/cti failed.</strong> ` +
+      `Your browser couldn't reach the MITRE CTI feed (corporate proxy, TLS interception, or offline). ` +
+      `Falling back to the bundled offline ATT&CK (38 data sources, 38 representative techniques, 20 groups). ` +
+      `Use this for the workflow demo, or upload a local STIX file on the MITRE CTI tab.`,
+      "warn"
+    );
+    try {
+      state.attack = await loadOfflineBundle();
+      onAttackLoaded("offline-bundle");
+    } catch (e2) {
+      setStatus(`Both online and offline ATT&CK failed: ${e2.message}`, "error");
+      setBanner(`<strong>Couldn't load any ATT&CK data:</strong> ${escapeHtml(e2.message)}`, "error");
+    }
   }
 }
 
@@ -215,6 +229,21 @@ $("#inventoryFile").addEventListener("change", async ev => {
     }
     state.inventory = looksJson ? importJson(text) : importYaml(text);
     saveInventory(state.inventory);
+
+    // If ATT&CK isn't loaded yet, the rows can't be displayed. Auto-load the
+    // bundled offline ATT&CK so the import is immediately visible — this is
+    // exactly the case where users were getting "17 entries imported" but
+    // seeing no rows because the network fetch had silently failed.
+    if (!state.attack) {
+      setStatus("ATT&CK not loaded — using bundled offline ATT&CK so the import is visible…", "busy");
+      try {
+        state.attack = await loadOfflineBundle();
+        onAttackLoaded("offline-bundle");
+      } catch (e2) {
+        setBanner(`Inventory was saved, but the bundled ATT&CK failed to load (${escapeHtml(e2.message)}). Reload the page or upload a STIX bundle on tab 1.`, "error");
+      }
+    }
+
     const counts = inventoryStats(state.inventory);
     refreshAll();
     if (counts.sources === 0) {
@@ -824,14 +853,27 @@ function pct(n) { return `${Math.round((n || 0) * 100)}%`; }
 // --- init ---
 (async () => {
   checkVendorLibs();
-  // Try cached only — don't auto-pull ~30 MB on first visit.
+  // Prefer cached real ATT&CK if available; otherwise auto-load the
+  // bundled offline ATT&CK so the app is usable on the first visit
+  // without depending on github.com being reachable.
   try {
     setStatus("Checking cache…", "busy");
     state.attack = await loadAttack({ domain: "enterprise-attack", cacheOnly: true });
     onAttackLoaded("cache");
   } catch (e) {
     if (e.code === "NO_CACHE") {
-      setStatus("Click Load / Refresh on tab 1 (MITRE CTI), or upload the sample mini-bundle.", "");
+      try {
+        setStatus("Loading bundled offline ATT&CK…", "busy");
+        state.attack = await loadOfflineBundle();
+        onAttackLoaded("offline-bundle");
+        setBanner(
+          `Loaded the <strong>bundled offline ATT&CK</strong> (38 data sources, 38 representative techniques, 20 groups). ` +
+          `Click <em>Load / Refresh</em> on tab 1 (<em>MITRE CTI Data</em>) to upgrade to the live MITRE feed.`,
+          "warn"
+        );
+      } catch (e2) {
+        setStatus(`Couldn't load bundled ATT&CK: ${e2.message}`, "error");
+      }
     } else {
       setStatus(`Cache check failed: ${e.message}`, "error");
     }
