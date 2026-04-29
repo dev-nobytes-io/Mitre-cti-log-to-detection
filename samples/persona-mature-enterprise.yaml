@@ -1,0 +1,135 @@
+# Persona: Mature enterprise SOC
+# ------------------------------------------------------------------
+# A 5,000-seat enterprise that has invested in detection engineering for
+# several years. Sysmon + EDR everywhere, Zeek on egress, Splunk SIEM,
+# AD on-prem, M365 cloud, MFA via Okta. Use this to see what "good
+# detection coverage" looks like in the Coverage and Navigator views.
+# ------------------------------------------------------------------
+version: 1.2
+file_type: data-source-administration
+name: Mature enterprise SOC
+systems:
+  - applicable_to: all
+    description: Windows + Linux endpoints, on-prem AD, M365, Okta, AWS
+
+data_sources:
+  - data_source_name: Process
+    score: 5
+    comment: Sysmon + CrowdStrike Falcon, full process tree across the fleet
+    data_quality: { device_completeness: 5, data_field_completeness: 5, timeliness: 5, consistency: 5, retention: 4 }
+    data_source:
+      - { name: Process Creation,    score: 5, comment: "Sysmon EID 1, parent + cmdline + hash" }
+      - { name: Process Termination, score: 4, comment: "Sysmon EID 5" }
+      - { name: Process Access,      score: 4, comment: "Sysmon EID 10 with curated targets" }
+      - { name: Process Metadata,    score: 5, comment: "" }
+      - { name: OS API Execution,    score: 3, comment: "EDR-derived, partial" }
+
+  - data_source_name: Command
+    score: 5
+    data_source:
+      - { name: Command Execution, score: 5, comment: "PowerShell ScriptBlock + cmd auditing + bash history shipping" }
+
+  - data_source_name: Script
+    score: 4
+    data_source:
+      - { name: Script Execution, score: 5, comment: "PS5+ ScriptBlock, transcript on tier-0" }
+
+  - data_source_name: File
+    score: 4
+    data_source:
+      - { name: File Creation,     score: 5, comment: "Sysmon EID 11" }
+      - { name: File Modification, score: 4, comment: "Targeted folders (sysvol, startup, AD)" }
+      - { name: File Deletion,     score: 3, comment: "Selective" }
+      - { name: File Metadata,     score: 4, comment: "" }
+      - { name: File Access,       score: 2, comment: "Only for crown-jewel shares" }
+
+  - data_source_name: Module
+    score: 4
+    data_source:
+      - { name: Module Load, score: 4, comment: "Sysmon EID 7 across servers" }
+
+  - data_source_name: Driver
+    score: 3
+    data_source:
+      - { name: Driver Load,     score: 4, comment: "Sysmon EID 6" }
+      - { name: Driver Metadata, score: 2, comment: "" }
+
+  - data_source_name: Service
+    score: 4
+    data_source:
+      - { name: Service Creation,     score: 5, comment: "EID 7045" }
+      - { name: Service Modification, score: 3, comment: "" }
+      - { name: Service Metadata,     score: 4, comment: "" }
+
+  - data_source_name: Windows Registry
+    score: 3
+    data_source:
+      - { name: Windows Registry Key Creation,     score: 4, comment: "Sysmon EID 12" }
+      - { name: Windows Registry Key Modification, score: 4, comment: "Sysmon EID 13/14" }
+      - { name: Windows Registry Key Deletion,     score: 3, comment: "" }
+      - { name: Windows Registry Key Access,       score: 1, comment: "Not collected at scale" }
+
+  - data_source_name: Scheduled Job
+    score: 4
+    data_source:
+      - { name: Scheduled Job Creation,     score: 5, comment: "Sec 4698 + EDR" }
+      - { name: Scheduled Job Modification, score: 3, comment: "" }
+
+  - data_source_name: WMI
+    score: 4
+    data_source:
+      - { name: WMI Creation, score: 4, comment: "" }
+
+  - data_source_name: Network Traffic
+    score: 4
+    data_source:
+      - { name: Network Connection Creation, score: 5, comment: "Zeek conn.log + Sysmon EID 3" }
+      - { name: Network Traffic Flow,        score: 4, comment: "Zeek + NetFlow on egress" }
+      - { name: Network Traffic Content,     score: 2, comment: "Only HTTP via proxy / TLS-inspected segments" }
+
+  - data_source_name: Logon Session
+    score: 5
+    data_source:
+      - { name: Logon Session Creation, score: 5, comment: "EID 4624/4625 + Okta SSO" }
+      - { name: Logon Session Metadata, score: 5, comment: "" }
+
+  - data_source_name: User Account
+    score: 5
+    data_source:
+      - { name: User Account Authentication, score: 5, comment: "Okta + AD" }
+      - { name: User Account Creation,       score: 5, comment: "EID 4720" }
+      - { name: User Account Modification,   score: 5, comment: "" }
+      - { name: User Account Deletion,       score: 5, comment: "" }
+      - { name: User Account Metadata,       score: 4, comment: "" }
+
+  - data_source_name: Active Directory
+    score: 4
+    data_source:
+      - { name: Active Directory Object Access,        score: 4, comment: "Object access auditing on tier-0" }
+      - { name: Active Directory Object Creation,      score: 5, comment: "" }
+      - { name: Active Directory Object Modification,  score: 5, comment: "" }
+      - { name: Active Directory Object Deletion,      score: 4, comment: "" }
+      - { name: Active Directory Credential Request,   score: 4, comment: "EID 4769 / 4768" }
+
+  - data_source_name: Application Log
+    score: 4
+    data_source:
+      - { name: Application Log Content, score: 4, comment: "M365 Unified Audit + custom apps via syslog" }
+
+  - data_source_name: Cloud Service
+    score: 3
+    data_source:
+      - { name: Cloud Service Enumeration, score: 3, comment: "AWS CloudTrail" }
+      - { name: Cloud Service Modification, score: 4, comment: "" }
+      - { name: Cloud Service Metadata,    score: 3, comment: "" }
+      - { name: Cloud Service Disable,     score: 3, comment: "" }
+
+  - data_source_name: Cloud Storage
+    score: 3
+    data_source:
+      - { name: Cloud Storage Access,       score: 2, comment: "S3 access logs only on sensitive buckets" }
+      - { name: Cloud Storage Creation,     score: 4, comment: "" }
+      - { name: Cloud Storage Deletion,     score: 4, comment: "" }
+      - { name: Cloud Storage Modification, score: 4, comment: "" }
+      - { name: Cloud Storage Enumeration,  score: 2, comment: "" }
+      - { name: Cloud Storage Metadata,     score: 3, comment: "" }
