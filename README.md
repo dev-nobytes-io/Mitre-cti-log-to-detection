@@ -42,16 +42,27 @@ Then open http://localhost:8080.
 
 ## Live demo
 
-This repo ships a GitHub Actions workflow
-([`.github/workflows/pages.yml`](.github/workflows/pages.yml)) that
-publishes the site to GitHub Pages on every push to `main`.
+The site is set up to work with **either** of GitHub Pages'
+[publishing sources](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site):
 
-To enable it on a fork:
+**Option A — GitHub Actions (recommended).** A workflow at
+[`.github/workflows/pages.yml`](.github/workflows/pages.yml) packages the
+repo root and deploys it via `actions/deploy-pages` on every push to
+`main`. Enable it once:
 
 1. **Settings → Pages → Build and deployment → Source: GitHub Actions**.
-2. Push to `main` (or run the workflow manually under the *Actions* tab).
-3. The deployed URL appears in the workflow's *deployment* step output —
-   typically `https://<owner>.github.io/<repo>/`.
+2. Push to `main` (or use *Actions → Deploy live demo → Run workflow*).
+3. The deployed URL appears in the *deployment* step output.
+
+**Option B — Deploy from a branch.** A `.nojekyll` marker at the repo
+root tells Pages to serve files as-is (no Jekyll). Enable it once:
+
+1. **Settings → Pages → Build and deployment → Source: Deploy from a
+   branch → Branch: `main` / Folder: `/ (root)`**.
+2. Pages publishes within ~1 minute.
+
+Same artifact, same URL — pick whichever source the dropdown is on.
+Typical URL: `https://<owner>.github.io/<repo>/`.
 
 The site is fully static (relative paths, HTTPS-only deps) so it also
 deploys cleanly to Cloudflare Pages, Netlify, or Vercel by pointing the
