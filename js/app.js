@@ -2,7 +2,7 @@ import { loadAttack, loadAttackFromBundle, clearAttackCache, loadOfflineBundle }
 import {
   loadInventory, saveInventory, resetInventory,
   effectiveComponentScores, setSourceScore, setComponentScore, setAllSources,
-  effectiveLogSourceScores, setLogSourceScore, setAllLogSources,
+  effectiveLogSourceScores, setLogSourceScore, setAllLogSources, removeLogSource,
   exportYaml, importYaml, exportJson, importJson,
 } from "./inventory.js";
 import { computeCoverage } from "./coverage.js";
@@ -206,6 +206,31 @@ function populateTacticFilter() {
 $("#dsFilter").addEventListener("input", e => { state.filters.ds = e.target.value.toLowerCase(); renderInventory(); });
 $("#platformFilter").addEventListener("change", e => { state.filters.platform = e.target.value; renderInventory(); });
 $("#onlyScored")?.addEventListener("change", e => { state.filters.onlyScored = e.target.checked; renderInventory(); });
+
+// Manual log-source entry. Lets the user type a (name, channel) tuple
+// the bundle doesn't know about — e.g. a vendor-specific event ID, a
+// Sigma-style logsource string, or a custom SIEM index. When the tuple
+// matches an existing STIX log source the score drives coverage
+// directly; otherwise the entry is persisted in inv.log_sources[] and
+// rendered in the "Custom log sources" panel.
+$("#customLsAdd")?.addEventListener("click", () => {
+  const name = ($("#customLsName")?.value || "").trim();
+  const channel = ($("#customLsChannel")?.value || "").trim();
+  const score = Number($("#customLsScore")?.value || 0);
+  const comment = ($("#customLsComment")?.value || "").trim();
+  if (!name && !channel) {
+    setStatus("Provide a name or channel", "error");
+    return;
+  }
+  setLogSourceScore(state.inventory, name, channel, score, { comment });
+  saveInventory(state.inventory);
+  // Reset form, leave the panel open so users can add several quickly.
+  if ($("#customLsName")) $("#customLsName").value = "";
+  if ($("#customLsChannel")) $("#customLsChannel").value = "";
+  if ($("#customLsComment")) $("#customLsComment").value = "";
+  setStatus(`Added log source ${name}/${channel} (score ${score})`, "ok");
+  refreshAll();
+});
 $("#componentFilter")?.addEventListener("input", e => { state.filters.component = e.target.value.toLowerCase(); renderComponents(); });
 $("#componentScoreFilter")?.addEventListener("change", e => { state.filters.componentScore = e.target.value; renderComponents(); });
 $("#setAllBtn").addEventListener("click", () => {
@@ -333,7 +358,43 @@ function renderLogSourceInventory(root, compScores, lsScores) {
     return true;
   });
 
-  let html = `<div class="ds-row header">
+  // Custom log sources: entries the user added by hand whose
+  // (name, channel) doesn't match any log source in the loaded bundle.
+  // Shown in their own collapsible block at the top of the list so the
+  // user can see / edit / remove them; they don't drive coverage but
+  // round-trip in YAML/JSON exports.
+  const knownKeys = new Set();
+  for (const ls of state.attack.logSources || []) {
+    knownKeys.add(((ls.name || "") + "|" + (ls.channel || "")).toLowerCase());
+  }
+  const customEntries = (state.inventory.log_sources || []).filter(e => {
+    const k = ((e.name || "") + "|" + (e.channel || "")).toLowerCase();
+    return !knownKeys.has(k);
+  });
+
+  let html = "";
+  if (customEntries.length > 0) {
+    html += `<div class="ds-row" style="background:var(--surface-2,#fafafa);font-weight:600">
+      <div></div>
+      <div>Custom log sources <span style="color:var(--muted);font-weight:400">(not in this ATT&CK bundle — kept for your records)</span></div>
+      <div></div>
+      <div></div>
+    </div>`;
+    for (const e of customEntries) {
+      const score = Number(e.score) || 0;
+      html += `<div class="dc-row custom-ls-row" data-custom-key="${escapeAttr((e.name||"") + "||" + (e.channel||""))}">
+        <div>
+          <div class="dc-name">${escapeHtml(e.name || "")} <span style="color:var(--muted);font-weight:400">/ ${escapeHtml(e.channel || "")}</span></div>
+          <div class="dc-meta">${escapeHtml(e.comment || "no comment")}</div>
+        </div>
+        <div class="dc-meta">custom</div>
+        <div>${scoreSelect(score, "ls", `${e.name || ""}||${e.channel || ""}`)}</div>
+        <div><button class="danger" data-remove-custom="${escapeAttr((e.name||"") + "||" + (e.channel||""))}" title="Remove">×</button></div>
+      </div>`;
+    }
+  }
+
+  html += `<div class="ds-row header">
     <div></div><div>Log source / Data component</div><div>Coverage</div><div>Score</div>
   </div>`;
 
@@ -396,6 +457,14 @@ function renderLogSourceInventory(root, compScores, lsScores) {
     sel.addEventListener("change", () => {
       const [name, channel] = sel.dataset.key.split("||");
       setLogSourceScore(state.inventory, name, channel, Number(sel.value));
+      saveInventory(state.inventory);
+      refreshAll();
+    });
+  });
+  root.querySelectorAll("[data-remove-custom]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const [name, channel] = btn.getAttribute("data-remove-custom").split("||");
+      removeLogSource(state.inventory, name, channel);
       saveInventory(state.inventory);
       refreshAll();
     });

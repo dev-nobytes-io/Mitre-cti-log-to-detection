@@ -114,7 +114,9 @@ useful for offline use or for pinning to a specific ATT&CK version.
 
 Score each log source — a `(name, channel)` tuple like `sysmon/1`, `auditd/execve`, or `okta/system` — from 0 (none) to 5 (excellent). Log sources are grouped by their parent data component so you can see what each contributes to. The inventory persists in `localStorage`.
 
-You can import / export the inventory as YAML or JSON. Exports use the v1.3 schema with a `log_sources:` block. Imports also accept the legacy DeTT&CT v1.2 `data_sources:` block — scores there are projected onto the matching log sources so old YAMLs round-trip cleanly. See `samples/inventory.example.yaml` for the v2 schema and `samples/persona-*.yaml` for the legacy form.
+**Manual entry.** Click *+ Add log source by hand* to type in custom `(name, channel)` tuples — useful for vendor-specific event IDs, Sigma-style `product/category/service` strings, or any custom SIEM index. If the tuple matches a log source in the bundle, the score lands on that record and immediately drives coverage. Otherwise the entry shows up in the *Custom log sources* panel for your records and round-trips on YAML/JSON export.
+
+You can import / export the inventory as YAML or JSON. Exports use the v1.3 schema with a `log_sources:` block. Imports also accept the legacy DeTT&CT v1.2 `data_sources:` block — scores there are projected onto the matching log sources so old YAMLs round-trip cleanly. The bundled persona files (`samples/persona-*.yaml`) are all v2 examples ranging from a greenfield startup with EDR-only telemetry through a mature SOC with full Sysmon + Zeek coverage.
 
 ### 3. Coverage
 
