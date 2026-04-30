@@ -20,7 +20,8 @@
 // Each row exposes V2-native fields plus legacy aliases
 // (totalDetectingComponents, coveredComponents, coveringComponents,
 // maxScore) so navigator.js, threats.js, and existing UI keep working.
-export function computeCoverage(attack, logSourceScores, { analyticAggregation = "min" } = {}) {
+export function computeCoverage(attack, logSourceScores, { analyticAggregation = "min", riskAccepted = null } = {}) {
+  const isRisk = (kind, key) => !!(riskAccepted && riskAccepted[kind] && riskAccepted[kind][key]);
   const aggregate = analyticAggregation === "avg"
     ? (vals) => vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0
     : (vals) => vals.length ? Math.min(...vals) : 0;
@@ -64,6 +65,18 @@ export function computeCoverage(attack, logSourceScores, { analyticAggregation =
     const weightedScore = litStrategies > 0 ? Math.max(...litStrats.map(s => s.score)) : 0;
     const ratio = totalStrategies === 0 ? 0 : litStrategies / totalStrategies;
 
+    // chunk 10: classify into a single status. Priority:
+    //   risk_accepted > lit > partial > uncovered > undetectable.
+    // Risk-accepted is a separate bucket from "uncovered" so users see
+    // explicit acknowledgement rather than red.
+    const riskAcceptedFlag = isRisk("techniques", tech.attackId);
+    let status;
+    if (totalStrategies === 0) status = "undetectable";
+    else if (riskAcceptedFlag) status = "risk_accepted";
+    else if (litStrategies === totalStrategies) status = "lit";
+    else if (litStrategies > 0) status = "partial";
+    else status = "uncovered";
+
     return {
       attackId: tech.attackId,
       stixId: tech.id,
@@ -78,6 +91,8 @@ export function computeCoverage(attack, logSourceScores, { analyticAggregation =
       ratio,
       contributing: stratEntries,
       hasDetections: totalStrategies > 0,
+      riskAccepted: riskAcceptedFlag,
+      status,
       // Legacy aliases so navigator.js, threats.js, and existing UI keep
       // working without changes. coveringComponents maps each lit strategy
       // into the legacy {sourceName, componentName, score} tooltip slot.
@@ -94,9 +109,12 @@ export function computeCoverage(attack, logSourceScores, { analyticAggregation =
   });
 
   const detectable = rows.filter(r => r.hasDetections);
-  const covered = detectable.filter(r => r.coveredComponents > 0);
-  const fully = detectable.filter(r => r.ratio >= 1);
-  const partial = detectable.filter(r => r.ratio > 0 && r.ratio < 1);
+  const riskAcceptedRows = rows.filter(r => r.riskAccepted);
+  // Covered/fully/partial counts exclude risk-accepted so the buckets
+  // are mutually exclusive.
+  const covered = detectable.filter(r => r.coveredComponents > 0 && !r.riskAccepted);
+  const fully = detectable.filter(r => r.ratio >= 1 && !r.riskAccepted);
+  const partial = detectable.filter(r => r.ratio > 0 && r.ratio < 1 && !r.riskAccepted);
 
   return {
     rows,
@@ -106,6 +124,7 @@ export function computeCoverage(attack, logSourceScores, { analyticAggregation =
       covered: covered.length,
       fully: fully.length,
       partial: partial.length,
+      riskAccepted: riskAcceptedRows.length,
       avgScore: covered.length ? covered.reduce((s, r) => s + r.weightedScore, 0) / covered.length : 0,
     },
     engine: "v2",

@@ -54,14 +54,14 @@ for (const { file, minScored, minComponents, kind } of PERSONAS) {
   });
 }
 
-test("manual entry: typing a custom log source persists, drives coverage if it matches the bundle, otherwise lands in the Custom panel", async () => {
-  // chunk 7: the inventory tab gained a free-form (name, channel, score,
-  // comment) entry form. Two cases to verify in one test:
-  //   1. a tuple that *matches* a STIX log source already in the bundle
-  //      drives coverage immediately (no need for it to live in
-  //      inventory.example.yaml).
-  //   2. a tuple that *doesn't* match (e.g. winlogbeat/9999) lands in
-  //      the "Custom log sources" panel and survives a save/load roundtrip.
+test("manual entry: typing a custom log source persists, drives coverage if it matches the bundle, otherwise lands in the right group", async () => {
+  // chunk 7 + chunk 9: the inventory tab gained a free-form
+  // (name, channel, score, comment) entry form at the top, and a
+  // by-name grouping (default). Two cases to verify in one test:
+  //   1. a tuple that *matches* a STIX log source already in the
+  //      bundle (sysmon/1) drives coverage immediately.
+  //   2. a tuple that *doesn't* match (winlogbeat/9999) lands in its
+  //      own by-name group and exposes a × remove button.
   const page = await newPage({ blockExternal: true });
   await bootApp(page);
   await activateTab(page, "inventory");
@@ -89,26 +89,135 @@ test("manual entry: typing a custom log source persists, drives coverage if it m
   await page.click("#customLsAdd");
   await page.waitForTimeout(150);
 
-  // The custom row must render with the correct meta + score select.
+  // The custom entry should land in the "winlogbeat" group with a (custom) marker.
+  // Expand the group first.
+  await page.evaluate(() => document.querySelector('[data-toggle="name:winlogbeat"]')?.click());
+  await page.waitForTimeout(150);
+
   const customRow = await page.evaluate(() => {
-    const row = document.querySelector('.custom-ls-row[data-custom-key="winlogbeat||9999"]');
+    const wrap = document.querySelector('[data-components-for="name:winlogbeat"]');
+    const row = wrap?.querySelector(".dc-row.by-name-row");
     if (!row) return null;
     return {
       score: Number(row.querySelector("select[data-kind='ls']")?.value || "0"),
       hasRemove: !!row.querySelector("[data-remove-custom]"),
-      comment: row.querySelector(".dc-meta")?.textContent?.trim(),
+      isCustom: /\(custom\)/.test(row.textContent || ""),
+      comment: row.textContent || "",
     };
   });
-  assert.ok(customRow, "custom row should render in the inventory list");
+  assert.ok(customRow, "custom row should render in the winlogbeat group");
   assert.equal(customRow.score, 4);
   assert.ok(customRow.hasRemove, "custom row should expose a × remove button");
+  assert.ok(customRow.isCustom, "row should be marked (custom) since the bundle doesn't know winlogbeat/9999");
   assert.match(customRow.comment, /vendor-specific event/);
 
   // Remove the custom entry.
   await page.click('[data-remove-custom="winlogbeat||9999"]');
   await page.waitForTimeout(150);
-  const stillThere = await page.evaluate(() => !!document.querySelector('.custom-ls-row[data-custom-key="winlogbeat||9999"]'));
-  assert.equal(stillThere, false, "custom entry should be removed after × click");
+  const stillThere = await page.evaluate(() => !!document.querySelector('[data-toggle="name:winlogbeat"]'));
+  assert.equal(stillThere, false, "winlogbeat group should disappear after the only entry is removed");
+
+  await page.context().close();
+});
+
+test("by-name view: groups every channel under its log-source name and the enable toggle parks coverage", async () => {
+  // chunk 9: the inventory tab gained a "Group by: log source name /
+  // data component" toggle. By-name is the new default. Asserts:
+  //   - importing the example inventory groups all sysmon/* channels
+  //     under one expandable banner,
+  //   - the banner footer shows "+ Add channel under sysmon",
+  //   - flipping one row's "enabled" checkbox to off drops the
+  //     "log sources scored" pill by 1.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  await activateTab(page, "inventory");
+  await importInventory(page, "inventory.example.yaml");
+  await page.waitForTimeout(150);
+
+  // Confirm by-name is the default mode.
+  const grouping = await page.evaluate(() => document.querySelector('input[name="inventoryGrouping"][value="name"]')?.checked);
+  assert.equal(grouping, true, "default grouping should be 'name'");
+
+  // Expand the sysmon banner.
+  await page.evaluate(() => {
+    const t = document.querySelector('[data-toggle="name:sysmon"]');
+    if (t) t.click();
+  });
+  await page.waitForTimeout(150);
+
+  const sysmonRows = await page.evaluate(() => {
+    const wrap = document.querySelector('[data-components-for="name:sysmon"]');
+    return Array.from(wrap?.querySelectorAll(".dc-row.by-name-row") || []).length;
+  });
+  assert.ok(sysmonRows >= 5, `expected >=5 sysmon channel rows, got ${sysmonRows}`);
+
+  const formExists = await page.evaluate(() => !!document.querySelector('form.add-channel-form[data-add-channel-name="sysmon"]'));
+  assert.ok(formExists, "Add channel form should appear under the sysmon group");
+
+  // Read scored count, flip one row off, read scored count again.
+  const beforeScored = await page.evaluate(() => {
+    const el = Array.from(document.querySelectorAll("#inventorySummary .pill")).find(p => /log sources scored/.test(p.textContent));
+    return Number(el?.querySelector("strong")?.textContent.split("/")[0].trim() || "0");
+  });
+  assert.ok(beforeScored >= 5, `expected >=5 log sources scored before park, got ${beforeScored}`);
+
+  // Disable sysmon/1 by toggling its enable checkbox.
+  await page.evaluate(() => {
+    const cb = document.querySelector('input[type=checkbox][data-ls-enable="sysmon||1"]');
+    if (cb) { cb.checked = false; cb.dispatchEvent(new Event("change", { bubbles: true })); }
+  });
+  await page.waitForTimeout(150);
+
+  const afterScored = await page.evaluate(() => {
+    const el = Array.from(document.querySelectorAll("#inventorySummary .pill")).find(p => /log sources scored/.test(p.textContent));
+    return Number(el?.querySelector("strong")?.textContent.split("/")[0].trim() || "0");
+  });
+  assert.equal(afterScored, beforeScored - 1, `disabling sysmon/1 should drop scored count by exactly 1, got ${beforeScored} -> ${afterScored}`);
+
+  await page.context().close();
+});
+
+test("by-name view: + Add channel inline form scores a new event code under the existing name", async () => {
+  // chunk 9: the per-name footer "+ Add channel" form must accept a
+  // new event code, save the score, and merge it into the same name
+  // group (so the user doesn't end up with a custom-only entry when
+  // the channel matches a known bundle log source).
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  await activateTab(page, "inventory");
+
+  // Expand the sysmon group (will be empty of saved entries on a fresh load).
+  await page.evaluate(() => document.querySelector('[data-toggle="name:sysmon"]')?.click());
+  await page.waitForTimeout(150);
+
+  // Use the inline Add-channel form with channel 5 (Process Termination, in the bundle).
+  await page.evaluate(() => {
+    const form = document.querySelector('form.add-channel-form[data-add-channel-name="sysmon"]');
+    form.querySelector("[data-add-channel-channel]").value = "5";
+    form.querySelector("[data-add-channel-score]").value = "4";
+    form.querySelector("[data-add-channel-comment]").value = "Process Termination";
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
+  await page.waitForTimeout(200);
+
+  const status = await page.locator("#statusText").innerText();
+  assert.match(status, /Added sysmon\/5/, `status should report add, got: ${status}`);
+
+  // The new row must be visible inside the same sysmon group, with the
+  // score select reflecting 4 and no "(custom)" label (sysmon/5 is in
+  // the bundle).
+  const newRow = await page.evaluate(() => {
+    const wrap = document.querySelector('[data-components-for="name:sysmon"]');
+    const row = Array.from(wrap?.querySelectorAll(".dc-row.by-name-row") || []).find(r => /^5/.test((r.querySelector(".dc-name")?.textContent || "").trim()));
+    if (!row) return null;
+    return {
+      score: Number(row.querySelector("select[data-kind='ls']")?.value || "0"),
+      isCustom: /\(custom\)/.test(row.textContent || ""),
+    };
+  });
+  assert.ok(newRow, "newly-added sysmon/5 row should render in the sysmon group");
+  assert.equal(newRow.score, 4);
+  assert.equal(newRow.isCustom, false, "channel 5 is in the bundle so the row must NOT be marked (custom)");
 
   await page.context().close();
 });

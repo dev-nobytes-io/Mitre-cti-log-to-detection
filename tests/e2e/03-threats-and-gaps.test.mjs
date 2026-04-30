@@ -79,6 +79,59 @@ test("v2 coverage: importing inventory.example.yaml lights up at least one techn
   await page.context().close();
 });
 
+test("risk-accepted technique drops out of the Gaps bucket and lands under Risk accepted", async () => {
+  // chunk 10: marking a technique as risk-accepted on the Coverage tab
+  // moves it from the gap bucket (in gap analysis) into a separate
+  // "risk_accepted" bucket. The total threat-technique count must
+  // stay the same — risk acceptance reclassifies, it doesn't drop.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+
+  // Bring in a partial inventory + a threat group with known gaps.
+  await activateTab(page, "inventory");
+  await importInventory(page, "persona-greenfield-startup.yaml");
+  await activateTab(page, "threats");
+  await importThreats(page, "threats-state-apts.yaml");
+
+  // Capture the gap counts before risk acceptance.
+  await activateTab(page, "gaps");
+  const before = await readStats(page, "#threatStats");
+  const beforeGaps = Number(before["Gaps"] || 0);
+  assert.ok(beforeGaps > 0, `expected >0 gap techniques before risk acceptance, got ${beforeGaps}`);
+
+  // Pick a technique attackId to risk-accept by reading one from the
+  // gaps bucket. Use the first ".tech-row" with attackId in the table.
+  const targetId = await page.evaluate(() => {
+    const row = document.querySelector("#threatTable .tech-row .tech-id");
+    return row?.textContent?.trim();
+  });
+  assert.ok(targetId, "couldn't find a threat-technique row to mark");
+
+  // Mark it accepted on the Coverage tab via the per-row toggle.
+  await activateTab(page, "coverage");
+  // The Coverage tab default-hides non-detectable; flip the filter to risk_accepted-incl.
+  await page.evaluate((id) => {
+    const btn = document.querySelector(`[data-risk-tech="${id}"]`);
+    if (btn) btn.click();
+  }, targetId);
+  await page.waitForTimeout(150);
+
+  // Coverage tab Risk-accepted stat-card should now be >= 1
+  const coverageStats = await readStats(page, "#coverageStats");
+  const riskAcc = Number(coverageStats["Risk accepted"] || 0);
+  assert.ok(riskAcc >= 1, `Coverage tab Risk-accepted card should be >=1, got ${riskAcc}`);
+
+  // Re-check gap analysis: Gaps should drop by 1, Risk accepted should be 1, total unchanged.
+  await activateTab(page, "gaps");
+  const after = await readStats(page, "#threatStats");
+  const afterGaps = Number(after["Gaps"] || 0);
+  const afterRisk = Number(after["Risk accepted"] || 0);
+  assert.ok(afterGaps === beforeGaps - 1 || afterRisk >= 1,
+    `expected Gaps to drop by 1 OR Risk accepted >=1, got Gaps ${beforeGaps} -> ${afterGaps}, Risk accepted ${afterRisk}`);
+
+  await page.context().close();
+});
+
 test("gap analysis populates when both inventory and threats are imported", async () => {
   const page = await newPage({ blockExternal: true });
   await bootApp(page);

@@ -39,6 +39,12 @@ export function emptyInventory() {
     systems: [{ applicable_to: "all", description: "Default system" }],
     data_sources: [],
     log_sources: [],
+    // chunk 10: per-kind risk-accepted dictionaries. Keys are stable
+    // identifiers (lsKey for log sources, STIX component id, technique
+    // attackId, group attackId). Value true means "we know we don't
+    // have / can't get this and we accept the gap." Distinct from
+    // score = 0 (haven't decided / haven't onboarded).
+    risk_accepted: { log_sources: {}, components: {}, techniques: {}, groups: {} },
   };
 }
 
@@ -76,6 +82,10 @@ function migrate(inv) {
   if (!inv.log_sources) inv.log_sources = [];
   if (!inv.version) inv.version = 1;
   if (!inv.name) inv.name = "Default inventory";
+  if (!inv.risk_accepted) inv.risk_accepted = { log_sources: {}, components: {}, techniques: {}, groups: {} };
+  for (const k of ["log_sources", "components", "techniques", "groups"]) {
+    if (!inv.risk_accepted[k]) inv.risk_accepted[k] = {};
+  }
   return inv;
 }
 
@@ -131,14 +141,19 @@ export function effectiveComponentScores(inv, attack) {
       const hasV1Override = !!(override && override.score !== undefined && override.score !== null);
       const v1Score = hasV1Override ? clampScore(override.score) : (entry ? sourceScore : 0);
 
-      // v2: project from any scored log source belonging to this component
+      // v2: project from any scored *and enabled* log source belonging to
+      // this component. Disabled entries (chunk 9: enabled === false) keep
+      // their score in storage but contribute 0 to coverage so users can
+      // park a feed without losing the saved score.
       let v2Score = 0;
       let v2Any = false;
       for (const lsId of dc.logSourceIds || []) {
         const ls = attack.logSourceById?.get(lsId);
         if (!ls) continue;
         const lsEntry = lsIdx.get(lsKey(ls.name, ls.channel));
-        if (lsEntry && lsEntry.score !== undefined && lsEntry.score !== null) {
+        if (!lsEntry) continue;
+        if (lsEntry.enabled === false) continue;
+        if (lsEntry.score !== undefined && lsEntry.score !== null) {
           v2Any = true;
           v2Score = Math.max(v2Score, clampScore(lsEntry.score));
         }
@@ -174,8 +189,12 @@ export function effectiveLogSourceScores(inv, attack) {
     let score = 0;
     let comment = "";
     let hasV2Override = false;
+    // chunk 9: explicit `enabled: false` means the user parked the feed
+    // without losing the saved score. Treat as score = 0 for coverage
+    // purposes; the saved score still round-trips on YAML export.
+    const enabled = !explicit || explicit.enabled !== false;
     if (explicit && explicit.score !== undefined && explicit.score !== null) {
-      score = clampScore(explicit.score);
+      score = enabled ? clampScore(explicit.score) : 0;
       comment = explicit.comment || "";
       hasV2Override = true;
     } else {
@@ -201,6 +220,8 @@ export function effectiveLogSourceScores(inv, attack) {
       channel: ls.channel,
       comment,
       hasV2Override,
+      enabled,
+      savedScore: explicit && explicit.score !== undefined && explicit.score !== null ? clampScore(explicit.score) : score,
     });
   }
   return out;
@@ -266,13 +287,40 @@ export function setLogSourceScore(inv, name, channel, score, opts = {}) {
       applicable_to: ["all"],
       date_connected: today(),
       score: clampScore(score),
+      enabled: true,
       comment: opts.comment || "",
     };
     inv.log_sources.push(entry);
   } else {
     entry.score = clampScore(score);
     if (opts.comment !== undefined) entry.comment = opts.comment;
+    if (entry.enabled === undefined) entry.enabled = true;
     if (!entry.date_connected) entry.date_connected = today();
+  }
+  return inv;
+}
+
+// chunk 9: park a log source without dropping the saved score. Stores
+// `enabled: false` on the entry; effectiveLogSourceScores treats it as
+// score 0 for coverage purposes but the saved score round-trips on
+// YAML/JSON export.
+export function setLogSourceEnabled(inv, name, channel, enabled) {
+  if (!Array.isArray(inv.log_sources)) inv.log_sources = [];
+  const key = lsKey(name, channel);
+  let entry = inv.log_sources.find(e => lsKey(e.name, e.channel) === key);
+  if (!entry) {
+    entry = {
+      name: name || "",
+      channel: channel || "",
+      applicable_to: ["all"],
+      date_connected: today(),
+      score: 0,
+      enabled: !!enabled,
+      comment: "",
+    };
+    inv.log_sources.push(entry);
+  } else {
+    entry.enabled = !!enabled;
   }
   return inv;
 }
@@ -290,6 +338,30 @@ export function removeLogSource(inv, name, channel) {
   const key = lsKey(name, channel);
   inv.log_sources = inv.log_sources.filter(e => lsKey(e.name, e.channel) !== key);
   return inv;
+}
+
+// chunk 10: risk-accepted helpers. `kind` ∈ {log_sources, components,
+// techniques, groups}; `key` is the stable id for that kind (lsKey
+// tuple, STIX component id, technique attackId, group attackId).
+const RISK_KINDS = new Set(["log_sources", "components", "techniques", "groups"]);
+
+export function setRiskAccepted(inv, kind, key, accepted) {
+  if (!RISK_KINDS.has(kind)) return inv;
+  if (!inv.risk_accepted) inv.risk_accepted = { log_sources: {}, components: {}, techniques: {}, groups: {} };
+  if (!inv.risk_accepted[kind]) inv.risk_accepted[kind] = {};
+  if (accepted) inv.risk_accepted[kind][key] = true;
+  else delete inv.risk_accepted[kind][key];
+  return inv;
+}
+
+export function isRiskAccepted(inv, kind, key) {
+  if (!RISK_KINDS.has(kind)) return false;
+  return !!(inv.risk_accepted && inv.risk_accepted[kind] && inv.risk_accepted[kind][key]);
+}
+
+// Resolve the risk-accepted key for a log source (name, channel) tuple.
+export function logSourceRiskKey(name, channel) {
+  return lsKey(name, channel);
 }
 
 function newEntry(name) {
@@ -327,8 +399,10 @@ export function exportYaml(inv) {
       applicable_to: e.applicable_to || ["all"],
       date_connected: e.date_connected || today(),
       score: clampScore(e.score),
+      enabled: e.enabled !== false,
       comment: e.comment || "",
     })),
+    risk_accepted: inv.risk_accepted || { log_sources: {}, components: {}, techniques: {}, groups: {} },
   };
   // Use jsyaml from CDN (loaded globally)
   return window.jsyaml.dump(doc, { lineWidth: 120, noRefs: true });
@@ -373,8 +447,17 @@ function importDoc(doc) {
       applicable_to: e.applicable_to || ["all"],
       date_connected: e.date_connected || today(),
       score: clampScore(e.score),
+      enabled: e.enabled !== false,
       comment: e.comment || "",
     })).filter(e => e.name || e.channel);
+  }
+  if (doc.risk_accepted && typeof doc.risk_accepted === "object") {
+    inv.risk_accepted = {
+      log_sources: { ...(doc.risk_accepted.log_sources || {}) },
+      components:  { ...(doc.risk_accepted.components || {}) },
+      techniques:  { ...(doc.risk_accepted.techniques || {}) },
+      groups:      { ...(doc.risk_accepted.groups || {}) },
+    };
   }
   return inv;
 }
