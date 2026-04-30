@@ -166,6 +166,28 @@ test("mobile (390px): importing a sample renders readable inventory rows without
   await page.context().close();
 });
 
+test("every panel exposes a 'How to use this tab' help block (chunk 11 SOPs)", async () => {
+  // chunk 11: every visible panel must have a `.tab-help` <details>
+  // explainer so users have an obvious entry point for "how do I make
+  // this work?". Tab 1 also includes the cross-tab Quick-start workflow.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  for (const id of TABS) {
+    const panelHasHelp = await page.evaluate(t => {
+      const panel = document.querySelector(`#tab-${t}`);
+      const details = panel?.querySelector(".tab-help");
+      const summary = details?.querySelector("summary")?.textContent || "";
+      return { found: !!details, summary: summary.trim() };
+    }, id);
+    assert.ok(panelHasHelp.found, `tab #${id} should have a .tab-help <details> block`);
+    assert.match(panelHasHelp.summary, /How to use this tab|Quick start/i, `tab #${id} help summary should mention 'How to use this tab' or 'Quick start', got: ${panelHasHelp.summary}`);
+  }
+  // Tab 1 specifically has the Quick start workflow.
+  const setupHelpText = await page.evaluate(() => document.querySelector("#tab-setup .tab-help-body")?.textContent || "");
+  assert.match(setupHelpText, /Tab 1.*Tab 2.*Tab 5.*Tab 6/s, `Setup tab help should reference the 4-step workflow, got: ${setupHelpText.slice(0, 200)}`);
+  await page.context().close();
+});
+
 test("desktop layout still works (no mobile dropdown shown)", async () => {
   const page = await newPage({ viewport: { width: 1280, height: 900 }, blockExternal: true });
   await bootApp(page);
