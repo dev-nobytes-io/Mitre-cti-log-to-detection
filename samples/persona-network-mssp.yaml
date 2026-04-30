@@ -7,91 +7,31 @@
 # of Discovery / Lateral Movement / Persistence techniques can't be
 # detected without endpoint visibility.
 # ------------------------------------------------------------------
-version: 1.2
+version: 1.3
 file_type: data-source-administration
 name: Network-centric MSSP
 systems:
   - applicable_to: all
     description: Manufacturing OT/IT, perimeter-only telemetry
 
-data_sources:
-  - data_source_name: Network Traffic
-    score: 5
-    comment: Zeek (full conn/dns/http/ssl), full PCAP at egress, IDS alerts
-    data_source:
-      - { name: Network Connection Creation, score: 5, comment: "Zeek conn.log" }
-      - { name: Network Traffic Flow,        score: 5, comment: "Zeek + NetFlow on edge + core" }
-      - { name: Network Traffic Content,     score: 4, comment: "Full PCAP at egress, sampled internal" }
+log_sources:
+  # ---- Network: Zeek + NetFlow + IDS at egress ----
+  - { name: zeek,     channel: conn,  score: 5, comment: "Full conn.log shipped from every egress sensor" }
+  - { name: zeek,     channel: http,  score: 4, comment: "Zeek http.log" }
+  - { name: zeek,     channel: ssl,   score: 4, comment: "Zeek ssl.log + JA3 enrichment" }
+  - { name: zeek,     channel: dns,   score: 4, comment: "Zeek dns.log shipped" }
+  - { name: suricata, channel: alert, score: 4, comment: "ET + Talos rules at edge" }
+  - { name: netflow,  channel: v9,    score: 5, comment: "NetFlow on edge + core" }
 
-  - data_source_name: Firewall
-    score: 5
-    data_source:
-      - { name: Firewall Rule Modification, score: 5, comment: "Palo Alto config audit" }
-      - { name: Firewall Disable,           score: 5, comment: "" }
-      - { name: Firewall Enumeration,       score: 4, comment: "" }
-      - { name: Firewall Metadata,          score: 4, comment: "" }
+  # ---- Firewall (Palo Alto + checkpoint) ----
+  - { name: windows-security, channel: "4946", score: 5, comment: "Firewall rule add (where Windows hosts log)" }
+  - { name: windows-security, channel: "4954", score: 5, comment: "Firewall enable / disable / metadata changes" }
 
-  - data_source_name: Domain Name
-    score: 4
-    data_source:
-      - { name: Active DNS,    score: 3, comment: "Outbound DNS via internal resolvers" }
-      - { name: Passive DNS,   score: 4, comment: "Zeek dns.log shipped" }
-      - { name: Domain Registration, score: 1, comment: "Manual via threat intel feeds" }
+  # ---- External / passive ----
+  - { name: public-data, channel: dns,   score: 4, comment: "PassiveTotal + DNSDB feeds" }
+  - { name: public-data, channel: scan,  score: 3, comment: "Censys / Shodan integration" }
+  - { name: public-data, channel: whois, score: 1, comment: "Manual via threat-intel feeds" }
 
-  - data_source_name: Application Log
-    score: 3
-    data_source:
-      - { name: Application Log Content, score: 3, comment: "Web proxy + WAF logs only" }
-
-  - data_source_name: Internet Scan
-    score: 3
-    data_source:
-      - { name: Response Content,  score: 3, comment: "Censys / Shodan integration" }
-      - { name: Response Metadata, score: 3, comment: "" }
-
-  - data_source_name: Web Credential
-    score: 2
-    data_source:
-      - { name: Web Credential Creation, score: 2, comment: "Limited — only via proxy auth" }
-      - { name: Web Credential Usage,    score: 2, comment: "" }
-
-  - data_source_name: User Account
-    score: 1
-    comment: Authentication visibility only via VPN / firewall logs
-    data_source:
-      - { name: User Account Authentication, score: 2, comment: "Firewall AAA + VPN auth" }
-      - { name: User Account Creation,       score: 0, comment: "" }
-      - { name: User Account Modification,   score: 0, comment: "" }
-
-  - data_source_name: Logon Session
-    score: 1
-    data_source:
-      - { name: Logon Session Creation, score: 1, comment: "VPN session start only" }
-
-  # Everything host-side is dark
-  - data_source_name: Process
-    score: 0
-  - data_source_name: Command
-    score: 0
-  - data_source_name: Script
-    score: 0
-  - data_source_name: File
-    score: 0
-  - data_source_name: Module
-    score: 0
-  - data_source_name: Driver
-    score: 0
-  - data_source_name: Service
-    score: 0
-  - data_source_name: Windows Registry
-    score: 0
-  - data_source_name: WMI
-    score: 0
-  - data_source_name: Scheduled Job
-    score: 0
-  - data_source_name: Active Directory
-    score: 0
-  - data_source_name: Cloud Service
-    score: 0
-  - data_source_name: Cloud Storage
-    score: 0
+  # ---- Web proxy / WAF / VPN auth ----
+  - { name: application-log, channel: generic, score: 3, comment: "Web proxy + WAF logs" }
+  - { name: okta,            channel: system,  score: 2, comment: "VPN AAA forwards to Okta system log (no other ID)" }

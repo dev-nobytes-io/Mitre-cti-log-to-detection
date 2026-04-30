@@ -104,9 +104,28 @@
       <div id="inventorySummary" class="inv-summary"></div>
       <div class="row">
         <label class="checkbox-row"><input type="checkbox" id="onlyScored" /> Show only scored entries</label>
-        <label class="checkbox-row"><input type="checkbox" id="legacyView" /> Show legacy data-source view</label>
         <button id="resetInventoryBtn" class="danger">Reset</button>
       </div>
+      <details id="customLsForm" class="custom-ls-form">
+        <summary>+ Add log source by hand (event ID / channel / SIEM-specific)</summary>
+        <p class="diagram-help">Useful when your tool emits a log under a different name than the bundle's defaults — e.g. <code>winlogbeat / Security/4688</code>, <code>edr-vendor / process_creation</code>, or a Sigma-style <code>product/category/service</code>. If the (name, channel) matches a log source the bundle already knows about, your score lands on that record and immediately drives coverage. Otherwise it's stored as a custom entry so you can keep track of it.</p>
+        <div class="row">
+          <label>Name <input type="text" id="customLsName" placeholder="sysmon, okta, custom-edr…" /></label>
+          <label>Channel / event ID <input type="text" id="customLsChannel" placeholder="4688, system, process_creation…" /></label>
+          <label>Score
+            <select id="customLsScore">
+              <option value="0">0 - None</option>
+              <option value="1">1 - Poor</option>
+              <option value="2">2 - Fair</option>
+              <option value="3" selected>3 - Good</option>
+              <option value="4">4 - Very good</option>
+              <option value="5">5 - Excellent</option>
+            </select>
+          </label>
+          <label>Comment <input type="text" id="customLsComment" placeholder="optional context" /></label>
+          <button id="customLsAdd" class="primary">Add</button>
+        </div>
+      </details>
       <div id="inventoryTable" class="ds-list"></div>
     </section>
 
@@ -128,8 +147,12 @@
 
     <section class="panel" id="tab-coverage" role="tabpanel">
       <h2>4. Detection strategies</h2>
-      <p>Techniques you can detect, derived from the data components your inventory covers. Score = max source quality &times; covered/total component ratio.</p>
+      <p>Detection strategies (top) bundle one or more analytics, each tied to specific log sources. Lit strategies surface the techniques you can detect (table below).</p>
       <div class="stats" id="coverageStats"></div>
+      <details id="strategySummaryDetails" open>
+        <summary class="strategy-summary-toggle">Detection strategies in this bundle (<span id="strategySummaryCount">0</span>)</summary>
+        <div id="strategySummary" class="ds-list"></div>
+      </details>
       <div class="row">
         <input type="search" id="techFilter" placeholder="Filter techniques (id, name, tactic)&hellip;" />
         <select id="tacticFilter"><option value="">All tactics</option></select>
@@ -140,6 +163,12 @@
           <option value="full">Full (ratio = 1)</option>
           <option value="uncovered">Uncovered</option>
         </select>
+        <label>Analytic score
+          <select id="analyticAggregation" title="How to aggregate log-source scores into an analytic score (V2 chain only)">
+            <option value="min" selected>min (weakest log)</option>
+            <option value="avg">avg (lenient)</option>
+          </select>
+        </label>
       </div>
       <div class="row">
         <button id="downloadDetectionsLayer" class="primary">Download detections Navigator layer</button>
@@ -194,6 +223,19 @@
       <h3 class="diagram-h">Conceptual model</h3>
       <p class="diagram-help">How a raw log becomes a detection-ready signal.</p>
       <div class="mermaid-host" id="diagramConceptual"></div>
+
+      <h3 class="diagram-h">Log source utility — what does logging this unlock?</h3>
+      <p class="diagram-help">Pick one or more log sources to see the cascade
+        <strong>Log Source &rarr; Data Component &rarr; Analytic &rarr; Detection Strategy &rarr; Technique &rarr; Threat Group</strong>.
+        Use it to communicate why <em>eventcode 1</em> or <em>eventcode 4624 logon_type 2</em> matter — each link upward is the threat-intel value that log carries. Lit (green) nodes are fully covered by your inventory; dim/yellow are blocked because at least one upstream log source is unscored.</p>
+      <div class="row">
+        <input type="search" id="logSourcePickerFilter" placeholder="Filter log sources (name or channel)…" />
+        <button id="logSourcePickerSelectVisible">Select all visible</button>
+        <button id="logSourcePickerClear" class="danger">Clear</button>
+        <span id="logSourcePickerCount" class="muted-pill">0 selected</span>
+      </div>
+      <div id="logSourcePicker" class="log-source-picker"></div>
+      <div class="mermaid-host" id="diagramLogSourceCascade"></div>
 
       <h3 class="diagram-h">Data source &rarr; components &rarr; techniques</h3>
       <div class="row">

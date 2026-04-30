@@ -282,6 +282,16 @@ export function setAllLogSources(inv, attack, score) {
   return inv;
 }
 
+// Drop the (name, channel) entry from inv.log_sources entirely. Used by
+// the Log Inventory UI to delete custom entries that don't match any
+// known STIX log source.
+export function removeLogSource(inv, name, channel) {
+  if (!Array.isArray(inv.log_sources)) return inv;
+  const key = lsKey(name, channel);
+  inv.log_sources = inv.log_sources.filter(e => lsKey(e.name, e.channel) !== key);
+  return inv;
+}
+
 function newEntry(name) {
   return {
     data_source_name: name,
@@ -302,6 +312,9 @@ function today() {
 
 // --- import / export ---
 
+// Export emits the v2 schema (log_sources only). Imports keep accepting
+// the legacy data_sources block for back-compat with v1.2 DeTT&CT files,
+// but new exports should not perpetuate the old layout.
 export function exportYaml(inv) {
   const doc = {
     version: 1.3,
@@ -315,17 +328,6 @@ export function exportYaml(inv) {
       date_connected: e.date_connected || today(),
       score: clampScore(e.score),
       comment: e.comment || "",
-    })),
-    data_sources: (inv.data_sources || []).map(e => ({
-      data_source_name: e.data_source_name,
-      applicable_to: e.applicable_to || ["all"],
-      date_registered: e.date_registered || today(),
-      date_connected: e.date_connected || today(),
-      available_for_data_analytics: e.available_for_data_analytics ?? true,
-      comment: e.comment || "",
-      score: clampScore(e.score),
-      data_quality: e.data_quality || SCORE_KEYS.reduce((o, k) => (o[k] = clampScore(e.score), o), {}),
-      data_source: (e.data_source || []).map(c => ({ name: c.name, score: clampScore(c.score), comment: c.comment || "" })),
     })),
   };
   // Use jsyaml from CDN (loaded globally)

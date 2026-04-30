@@ -3,137 +3,39 @@
 # A 200-person SaaS company that runs entirely in AWS + GCP, no AD,
 # Okta as IdP, GSuite + Slack, all infra is Kubernetes. Strong cloud
 # control-plane logging, decent identity logging, almost no endpoint
-# telemetry (only laptops via a lightweight EDR). Use this to see
-# coverage skewed heavily toward cloud / identity techniques and almost
-# nothing for traditional Windows persistence techniques.
+# telemetry (only laptops via lightweight EDR / Jamf Protect on Mac).
+# Use this to see coverage skewed heavily toward cloud / identity
+# techniques and almost nothing for traditional Windows persistence.
 # ------------------------------------------------------------------
-version: 1.2
+version: 1.3
 file_type: data-source-administration
 name: Cloud-first SaaS startup
 systems:
   - applicable_to: all
     description: AWS + GCP + Kubernetes, Okta IdP, GSuite, MacOS laptops
 
-data_sources:
-  - data_source_name: Cloud Service
-    score: 5
-    comment: CloudTrail (AWS), Audit Logs (GCP), GSuite Audit, all into BigQuery
-    data_source:
-      - { name: Cloud Service Enumeration,  score: 5, comment: "" }
-      - { name: Cloud Service Modification, score: 5, comment: "" }
-      - { name: Cloud Service Metadata,     score: 5, comment: "" }
-      - { name: Cloud Service Disable,      score: 5, comment: "" }
+log_sources:
+  # ---- Cloud control plane (the core of this stack) ----
+  - { name: aws-cloudtrail,   channel: management,      score: 5, comment: "Org Trail -> BigQuery; full IAM / config events" }
+  - { name: aws-cloudtrail,   channel: data,            score: 4, comment: "S3 + Lambda data events on sensitive resources" }
+  - { name: azure-activity,   channel: activity,        score: 3, comment: "Subscription activity logs (some workloads on Azure)" }
 
-  - data_source_name: Cloud Storage
-    score: 4
-    data_source:
-      - { name: Cloud Storage Access,       score: 4, comment: "S3 access logs + GCS data access logs" }
-      - { name: Cloud Storage Creation,     score: 5, comment: "" }
-      - { name: Cloud Storage Deletion,     score: 5, comment: "" }
-      - { name: Cloud Storage Modification, score: 5, comment: "" }
-      - { name: Cloud Storage Enumeration,  score: 4, comment: "" }
-      - { name: Cloud Storage Metadata,     score: 4, comment: "" }
+  # ---- Identity (Okta + cloud IdPs) ----
+  - { name: okta,             channel: system,          score: 5, comment: "Universal directory audit + SSO events" }
+  - { name: azure-signinlogs, channel: SignInLogs,      score: 4, comment: "Azure AD sign-ins for the Azure tenant" }
+  - { name: azure-auditlogs,  channel: "Add user",      score: 5, comment: "Azure AD user create" }
+  - { name: azure-auditlogs,  channel: "Update user",   score: 5, comment: "Azure AD user update" }
+  - { name: m365,             channel: unifiedauditlog, score: 3, comment: "Sparse - mostly using GSuite" }
+  - { name: application-log,  channel: generic,         score: 4, comment: "GSuite + Slack + GitHub + Jira audit -> SIEM" }
 
-  - data_source_name: Instance
-    score: 4
-    data_source:
-      - { name: Instance Creation,     score: 5, comment: "" }
-      - { name: Instance Deletion,     score: 5, comment: "" }
-      - { name: Instance Modification, score: 4, comment: "" }
-      - { name: Instance Start,        score: 5, comment: "" }
-      - { name: Instance Stop,         score: 5, comment: "" }
-      - { name: Instance Metadata,     score: 4, comment: "" }
-      - { name: Instance Enumeration,  score: 3, comment: "" }
+  # ---- Kubernetes (EKS + GKE audit logs) ----
+  - { name: k8s-audit, channel: pods,    score: 5, comment: "Audit policy logs creates / modifies / deletes" }
+  - { name: k8s-audit, channel: cluster, score: 4, comment: "Cluster-scope events" }
+  - { name: docker,    channel: events,  score: 3, comment: "Container runtime events on bare nodes" }
 
-  - data_source_name: Container
-    score: 4
-    data_source:
-      - { name: Container Creation,    score: 5, comment: "EKS audit logs" }
-      - { name: Container Start,       score: 5, comment: "" }
-      - { name: Container Metadata,    score: 4, comment: "" }
-      - { name: Container Enumeration, score: 3, comment: "" }
+  # ---- Mac endpoint (Jamf Protect on laptops only - no servers) ----
+  - { name: sysmon, channel: "1",  score: 1, comment: "Sysmon For Linux on a few staging boxes" }
 
-  - data_source_name: Pod
-    score: 4
-    data_source:
-      - { name: Pod Creation,     score: 5, comment: "K8s audit logs" }
-      - { name: Pod Modification, score: 5, comment: "" }
-      - { name: Pod Enumeration,  score: 3, comment: "" }
-      - { name: Pod Metadata,     score: 4, comment: "" }
-
-  - data_source_name: Image
-    score: 3
-    data_source:
-      - { name: Image Creation,     score: 4, comment: "ECR/Artifact Registry events" }
-      - { name: Image Modification, score: 3, comment: "" }
-      - { name: Image Deletion,     score: 3, comment: "" }
-      - { name: Image Metadata,     score: 3, comment: "" }
-
-  - data_source_name: User Account
-    score: 5
-    comment: Okta universal directory, full audit shipping
-    data_source:
-      - { name: User Account Authentication, score: 5, comment: "Okta + AWS IAM + GCP IAM" }
-      - { name: User Account Creation,       score: 5, comment: "" }
-      - { name: User Account Deletion,       score: 5, comment: "" }
-      - { name: User Account Modification,   score: 5, comment: "" }
-      - { name: User Account Metadata,       score: 4, comment: "" }
-
-  - data_source_name: Logon Session
-    score: 4
-    data_source:
-      - { name: Logon Session Creation, score: 5, comment: "Okta + cloud IdP" }
-      - { name: Logon Session Metadata, score: 4, comment: "" }
-
-  - data_source_name: Application Log
-    score: 4
-    data_source:
-      - { name: Application Log Content, score: 4, comment: "GSuite, Slack, Github audit, Jira" }
-
-  - data_source_name: Persona
-    score: 3
-    data_source:
-      - { name: Social Media, score: 0, comment: "Not monitored" }
-
-  - data_source_name: Process
-    score: 2
-    comment: Lightweight EDR (Jamf Protect) on Mac laptops only — no servers
-    data_source:
-      - { name: Process Creation,    score: 3, comment: "Mac endpoints only" }
-      - { name: Process Termination, score: 2, comment: "" }
-      - { name: Process Metadata,    score: 2, comment: "" }
-      - { name: Process Access,      score: 0, comment: "" }
-
-  - data_source_name: Command
-    score: 2
-    data_source:
-      - { name: Command Execution, score: 2, comment: "Limited (zsh history not centralized)" }
-
-  - data_source_name: File
-    score: 1
-    data_source:
-      - { name: File Creation,     score: 1, comment: "" }
-      - { name: File Modification, score: 1, comment: "" }
-      - { name: File Deletion,     score: 0, comment: "" }
-      - { name: File Access,       score: 0, comment: "" }
-
-  - data_source_name: Network Traffic
-    score: 1
-    data_source:
-      - { name: Network Connection Creation, score: 1, comment: "VPC flow logs only on prod accounts" }
-      - { name: Network Traffic Flow,        score: 1, comment: "VPC flow logs" }
-      - { name: Network Traffic Content,     score: 0, comment: "Not collected" }
-
-  - data_source_name: Active Directory
-    score: 0
-    comment: No on-prem AD; Okta is the directory
-
-  - data_source_name: Windows Registry
-    score: 0
-    comment: No Windows endpoints
-
-  - data_source_name: WMI
-    score: 0
-
-  - data_source_name: Service
-    score: 0
+  # ---- VPC flow logs (production accounts only) ----
+  - { name: zeek,    channel: conn, score: 1, comment: "Single Zeek tap; experimental" }
+  - { name: netflow, channel: v9,   score: 1, comment: "VPC flow logs only on prod accounts" }

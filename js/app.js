@@ -2,12 +2,12 @@ import { loadAttack, loadAttackFromBundle, clearAttackCache, loadOfflineBundle }
 import {
   loadInventory, saveInventory, resetInventory,
   effectiveComponentScores, setSourceScore, setComponentScore, setAllSources,
-  effectiveLogSourceScores, setLogSourceScore, setAllLogSources,
+  effectiveLogSourceScores, setLogSourceScore, setAllLogSources, removeLogSource,
   exportYaml, importYaml, exportJson, importJson,
 } from "./inventory.js";
 import { computeCoverage } from "./coverage.js";
 import { buildNavigatorLayer } from "./navigator.js";
-import { conceptualDiagram, sourceDiagram, techniqueDiagram, overviewDiagram } from "./diagrams.js";
+import { conceptualDiagram, sourceDiagram, techniqueDiagram, overviewDiagram, logSourceCascadeDiagram } from "./diagrams.js";
 import {
   loadThreats, saveThreats, resetThreats,
   isGroupSelected, setGroupSelected, clearSelection,
@@ -30,7 +30,7 @@ const state = {
     coverage: "",
     group: "",
     threatStatus: "",
-    legacyView: false, // chunk 3: log sources are the new primary unit; data-source view kept behind a toggle
+    analyticAggregation: "min", // how to aggregate log-source scores into an analytic score (V2 chain)
   },
   expanded: new Set(),
   graph: {
@@ -38,6 +38,9 @@ const state = {
     techStixId: "",
     maxTech: 20,
     onlyCovered: false,
+    // chunk 8: log-source cascade picker
+    selectedLogSources: new Set(), // Set<logSourceId>
+    logSourceFilter: "",
   },
   mermaidReady: false,
   mermaidSeq: 0,
@@ -206,7 +209,31 @@ function populateTacticFilter() {
 $("#dsFilter").addEventListener("input", e => { state.filters.ds = e.target.value.toLowerCase(); renderInventory(); });
 $("#platformFilter").addEventListener("change", e => { state.filters.platform = e.target.value; renderInventory(); });
 $("#onlyScored")?.addEventListener("change", e => { state.filters.onlyScored = e.target.checked; renderInventory(); });
-$("#legacyView")?.addEventListener("change", e => { state.filters.legacyView = e.target.checked; renderInventory(); });
+
+// Manual log-source entry. Lets the user type a (name, channel) tuple
+// the bundle doesn't know about — e.g. a vendor-specific event ID, a
+// Sigma-style logsource string, or a custom SIEM index. When the tuple
+// matches an existing STIX log source the score drives coverage
+// directly; otherwise the entry is persisted in inv.log_sources[] and
+// rendered in the "Custom log sources" panel.
+$("#customLsAdd")?.addEventListener("click", () => {
+  const name = ($("#customLsName")?.value || "").trim();
+  const channel = ($("#customLsChannel")?.value || "").trim();
+  const score = Number($("#customLsScore")?.value || 0);
+  const comment = ($("#customLsComment")?.value || "").trim();
+  if (!name && !channel) {
+    setStatus("Provide a name or channel", "error");
+    return;
+  }
+  setLogSourceScore(state.inventory, name, channel, score, { comment });
+  saveInventory(state.inventory);
+  // Reset form, leave the panel open so users can add several quickly.
+  if ($("#customLsName")) $("#customLsName").value = "";
+  if ($("#customLsChannel")) $("#customLsChannel").value = "";
+  if ($("#customLsComment")) $("#customLsComment").value = "";
+  setStatus(`Added log source ${name}/${channel} (score ${score})`, "ok");
+  refreshAll();
+});
 $("#componentFilter")?.addEventListener("input", e => { state.filters.component = e.target.value.toLowerCase(); renderComponents(); });
 $("#componentScoreFilter")?.addEventListener("change", e => { state.filters.componentScore = e.target.value; renderComponents(); });
 $("#setAllBtn").addEventListener("click", () => {
@@ -312,9 +339,6 @@ function renderInventory() {
     `;
   }
 
-  if (state.filters.legacyView) {
-    return renderLegacyDataSourceInventory(root, compScores);
-  }
   return renderLogSourceInventory(root, compScores, lsScores);
 }
 
@@ -337,7 +361,43 @@ function renderLogSourceInventory(root, compScores, lsScores) {
     return true;
   });
 
-  let html = `<div class="ds-row header">
+  // Custom log sources: entries the user added by hand whose
+  // (name, channel) doesn't match any log source in the loaded bundle.
+  // Shown in their own collapsible block at the top of the list so the
+  // user can see / edit / remove them; they don't drive coverage but
+  // round-trip in YAML/JSON exports.
+  const knownKeys = new Set();
+  for (const ls of state.attack.logSources || []) {
+    knownKeys.add(((ls.name || "") + "|" + (ls.channel || "")).toLowerCase());
+  }
+  const customEntries = (state.inventory.log_sources || []).filter(e => {
+    const k = ((e.name || "") + "|" + (e.channel || "")).toLowerCase();
+    return !knownKeys.has(k);
+  });
+
+  let html = "";
+  if (customEntries.length > 0) {
+    html += `<div class="ds-row" style="background:var(--surface-2,#fafafa);font-weight:600">
+      <div></div>
+      <div>Custom log sources <span style="color:var(--muted);font-weight:400">(not in this ATT&CK bundle — kept for your records)</span></div>
+      <div></div>
+      <div></div>
+    </div>`;
+    for (const e of customEntries) {
+      const score = Number(e.score) || 0;
+      html += `<div class="dc-row custom-ls-row" data-custom-key="${escapeAttr((e.name||"") + "||" + (e.channel||""))}">
+        <div>
+          <div class="dc-name">${escapeHtml(e.name || "")} <span style="color:var(--muted);font-weight:400">/ ${escapeHtml(e.channel || "")}</span></div>
+          <div class="dc-meta">${escapeHtml(e.comment || "no comment")}</div>
+        </div>
+        <div class="dc-meta">custom</div>
+        <div>${scoreSelect(score, "ls", `${e.name || ""}||${e.channel || ""}`)}</div>
+        <div><button class="danger" data-remove-custom="${escapeAttr((e.name||"") + "||" + (e.channel||""))}" title="Remove">×</button></div>
+      </div>`;
+    }
+  }
+
+  html += `<div class="ds-row header">
     <div></div><div>Log source / Data component</div><div>Coverage</div><div>Score</div>
   </div>`;
 
@@ -404,82 +464,10 @@ function renderLogSourceInventory(root, compScores, lsScores) {
       refreshAll();
     });
   });
-}
-
-// v1 legacy view: score data sources / components directly. Kept behind
-// the "Show legacy data-source view" toggle so users with old DeTT&CT
-// inventories can still drive the same scoring path.
-function renderLegacyDataSourceInventory(root, compScores) {
-  const filterText = state.filters.ds;
-  const filterPlatform = state.filters.platform;
-  const onlyScored = !!state.filters.onlyScored;
-
-  const sources = state.attack.dataSources.filter(ds => {
-    if (filterText && !(ds.name.toLowerCase().includes(filterText) || ds.attackId?.toLowerCase().includes(filterText))) return false;
-    if (filterPlatform && !ds.platforms.includes(filterPlatform)) return false;
-    if (onlyScored && getSourceScore(ds) === 0 && !ds.components.some(c => (compScores.get(c.id)?.score || 0) > 0)) return false;
-    return true;
-  });
-
-  let html = `<div class="ds-row header">
-    <div></div><div>Data source</div><div>Components</div><div>Score</div>
-  </div>`;
-
-  for (const ds of sources) {
-    const expanded = state.expanded.has(ds.id);
-    const score = getSourceScore(ds);
-    const compCount = ds.components.length;
-    const coveredComp = ds.components.filter(c => (compScores.get(c.id)?.score || 0) > 0).length;
-    html += `
-      <div class="ds-row" data-ds-id="${escapeAttr(ds.id)}">
-        <div class="toggle" data-toggle="${escapeAttr(ds.id)}">${expanded ? "▾" : "▸"}</div>
-        <div>
-          <div class="ds-name">${escapeHtml(ds.name)} <span style="color:var(--muted);font-weight:400">${escapeHtml(ds.attackId || "")}</span></div>
-          <div class="ds-meta">${escapeHtml(ds.platforms.join(", ") || "—")} · ${coveredComp}/${compCount} components scored</div>
-        </div>
-        <div class="ds-meta">${compCount} component${compCount === 1 ? "" : "s"}</div>
-        <div>${scoreSelect(score, "ds", ds.name)}</div>
-      </div>
-      <div class="ds-components ${expanded ? "open" : ""}" data-components-for="${escapeAttr(ds.id)}">
-        ${ds.components.map(dc => {
-          const eff = compScores.get(dc.id);
-          const dcScore = eff?.score ?? score;
-          const techCount = dc.techniqueIds.length;
-          return `<div class="dc-row">
-            <div>
-              <div class="dc-name">${escapeHtml(dc.name)}</div>
-              <div class="dc-meta">${techCount} technique${techCount === 1 ? "" : "s"} detected</div>
-            </div>
-            <div class="dc-meta">${eff?.hasOverride ? "(override)" : "(inherits)"}</div>
-            <div>${scoreSelect(dcScore, "dc", `${ds.name}|${dc.name}`)}</div>
-          </div>`;
-        }).join("") || `<div class="dc-meta">No components defined.</div>`}
-      </div>
-    `;
-  }
-
-  root.innerHTML = html;
-
-  root.querySelectorAll("[data-toggle]").forEach(el => {
-    el.addEventListener("click", () => {
-      const id = el.getAttribute("data-toggle");
-      if (state.expanded.has(id)) state.expanded.delete(id);
-      else state.expanded.add(id);
-      renderInventory();
-    });
-  });
-
-  root.querySelectorAll("select[data-kind]").forEach(sel => {
-    sel.addEventListener("change", () => {
-      const kind = sel.dataset.kind;
-      const key = sel.dataset.key;
-      const value = Number(sel.value);
-      if (kind === "ds") {
-        setSourceScore(state.inventory, key, value, { cascade: true });
-      } else {
-        const [src, comp] = key.split("|");
-        setComponentScore(state.inventory, src, comp, value);
-      }
+  root.querySelectorAll("[data-remove-custom]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const [name, channel] = btn.getAttribute("data-remove-custom").split("||");
+      removeLogSource(state.inventory, name, channel);
       saveInventory(state.inventory);
       refreshAll();
     });
@@ -509,17 +497,23 @@ function renderComponents() {
       score,
       hasOverride: !!eff?.hasOverride,
       techCount: dc.techniqueIds.length,
+      logSourceCount: (dc.logSourceIds || []).length,
+      analyticCount: (dc.analyticIds || []).length,
     };
   });
   const total = all.length;
   const covered = all.filter(c => c.score > 0).length;
   const good = all.filter(c => c.score >= 3).length;
+  const totalAnalytics = state.attack.analytics?.length || 0;
+  const totalLogSources = state.attack.logSources?.length || 0;
   if (stats) {
     stats.innerHTML = `
       <div class="stat-card"><div class="label">Total components</div><div class="value">${total}</div></div>
       <div class="stat-card"><div class="label">Covered (score &gt; 0)</div><div class="value">${covered}</div><div class="sub">${pct(covered/Math.max(total,1))}</div></div>
       <div class="stat-card"><div class="label">Good (score &ge; 3)</div><div class="value">${good}</div></div>
       <div class="stat-card"><div class="label">Uncovered</div><div class="value" style="color:var(--bad)">${total - covered}</div></div>
+      <div class="stat-card"><div class="label">Log sources (total)</div><div class="value">${totalLogSources}</div></div>
+      <div class="stat-card"><div class="label">Analytics (total)</div><div class="value">${totalAnalytics}</div></div>
     `;
   }
   const rows = all.filter(c => {
@@ -530,14 +524,14 @@ function renderComponents() {
     return true;
   }).sort((a, b) => b.score - a.score || a.sourceName.localeCompare(b.sourceName) || a.name.localeCompare(b.name));
 
-  let html = `<div class="tech-row header"><div>Component</div><div>Data source</div><div>Techniques</div><div></div><div>Score</div></div>`;
+  let html = `<div class="tech-row header"><div>Component</div><div>Data source</div><div>Log sources / Analytics</div><div>Techniques</div><div>Score</div></div>`;
   for (const c of rows.slice(0, 1500)) {
     html += `
       <div class="tech-row">
-        <div><strong>${escapeHtml(c.name)}</strong></div>
+        <div><strong>${escapeHtml(c.name)}</strong>${c.hasOverride ? ' <span style="color:var(--muted);font-size:11px">(scored)</span>' : ""}</div>
         <div style="color:var(--muted)">${escapeHtml(c.sourceName)}</div>
+        <div style="color:var(--muted);font-size:11px">${c.logSourceCount} log src · ${c.analyticCount} analytic${c.analyticCount === 1 ? "" : "s"}</div>
         <div style="color:var(--muted);font-size:11px">${c.techCount} tech</div>
-        <div style="color:var(--muted);font-size:11px">${c.hasOverride ? "override" : ""}</div>
         <div><span class="score-badge s${c.score}">${c.score}</span></div>
       </div>
     `;
@@ -555,10 +549,94 @@ function getSourceScore(ds) {
   return entry ? Number(entry.score) || 0 : 0;
 }
 
+// Coverage engine walks Log Source -> Analytic -> Detection Strategy ->
+// Technique. Bundles without detection strategies (older STIX dumps or
+// custom uploads) produce zero-coverage rows but the call still returns a
+// stable shape so the UI doesn't break.
+function runCoverage() {
+  if (!state.attack) return null;
+  return computeCoverage(
+    state.attack,
+    effectiveLogSourceScores(state.inventory, state.attack),
+    { analyticAggregation: state.filters.analyticAggregation || "min" },
+  );
+}
+
+// --- Detection Strategies summary (tab 4 header) ---
+// Renders one card per x-mitre-detection-strategy in the loaded bundle,
+// with lit/unlit status, the analytics it bundles, and the techniques it
+// detects. Drives off the v2 coverage rows so the same min/avg toggle
+// applies. When V2 isn't active (e.g. legacy bundle without
+// detection-strategy STIX objects) the section stays empty.
+function renderDetectionStrategies(coverage) {
+  const root = $("#strategySummary");
+  const countEl = $("#strategySummaryCount");
+  if (!root) return;
+  const strategies = state.attack?.detectionStrategies || [];
+  if (countEl) countEl.textContent = String(strategies.length);
+  if (!state.attack || strategies.length === 0) {
+    root.innerHTML = `<div style="padding:12px;color:var(--muted)">No detection strategies in this bundle (legacy v1 data uses the technique table below).</div>`;
+    return;
+  }
+
+  // Per-strategy lit/unlit + score derived from V2 coverage. If the
+  // active engine isn't V2 (no logSourceScores), strategies fall back
+  // to "unlit" with score 0.
+  const techniqueByStratId = new Map(); // strategyId -> Set(techniqueAttackId)
+  if (coverage && coverage.engine === "v2") {
+    for (const row of coverage.rows) {
+      for (const c of row.contributing || []) {
+        if (!c.lit) continue;
+        if (!techniqueByStratId.has(c.id)) techniqueByStratId.set(c.id, new Set());
+        techniqueByStratId.get(c.id).add(row.attackId);
+      }
+    }
+  }
+  // Compute per-strategy display info using the same helpers V2 used.
+  // We re-derive lit/score per analytic so the card matches whatever
+  // V2 just computed — duplicate work but cheap (<150 strategies).
+  const lsScores = state.attack.logSources ? effectiveLogSourceScores(state.inventory, state.attack) : new Map();
+  const aggMode = state.filters.analyticAggregation || "min";
+  const aggregate = aggMode === "avg"
+    ? (vs) => vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : 0
+    : (vs) => vs.length ? Math.min(...vs) : 0;
+
+  let html = "";
+  for (const st of strategies) {
+    const ans = (st.analyticIds || []).map(id => state.attack.analyticById?.get(id)).filter(Boolean);
+    const litAns = [];
+    let logSourceCount = 0;
+    for (const a of ans) {
+      const lsList = (a.logSourceIds || []).map(id => ({ id, score: lsScores.get(id)?.score || 0 }));
+      logSourceCount += lsList.length;
+      const scores = lsList.map(l => l.score);
+      if (lsList.length > 0 && scores.every(s => s > 0)) {
+        litAns.push({ id: a.id, name: a.name, score: aggregate(scores) });
+      }
+    }
+    const lit = litAns.length > 0;
+    const score = lit ? Math.max(...litAns.map(a => a.score)) : 0;
+    const detectedTechIds = techniqueByStratId.get(st.id) || new Set();
+    const detectedCount = detectedTechIds.size || (st.techniqueIds?.length || 0);
+    html += `
+      <div class="ds-row strategy-card${lit ? " lit" : ""}">
+        <div></div>
+        <div>
+          <div class="ds-name">${escapeHtml(st.name)} <span style="color:var(--muted);font-weight:400">${escapeHtml(st.attackId || "")}</span></div>
+          <div class="ds-meta">${ans.length} analytic${ans.length === 1 ? "" : "s"} · ${logSourceCount} log-source ref${logSourceCount === 1 ? "" : "s"} · ${detectedCount} technique${detectedCount === 1 ? "" : "s"} detected</div>
+        </div>
+        <div class="ds-meta">${litAns.length}/${ans.length} analytics lit</div>
+        <div><span class="score-badge s${Math.round(score)}">${lit ? score.toFixed(1) : "○"}</span></div>
+      </div>`;
+  }
+  root.innerHTML = html;
+}
+
 // --- Coverage tab ---
 $("#techFilter").addEventListener("input", e => { state.filters.tech = e.target.value.toLowerCase(); renderCoverage(); });
 $("#tacticFilter").addEventListener("change", e => { state.filters.tactic = e.target.value; renderCoverage(); });
 $("#coverageFilter").addEventListener("change", e => { state.filters.coverage = e.target.value; renderCoverage(); });
+$("#analyticAggregation")?.addEventListener("change", e => { state.filters.analyticAggregation = e.target.value; refreshAll(); });
 
 function renderCoverage() {
   const root = $("#techniqueTable");
@@ -566,14 +644,17 @@ function renderCoverage() {
   if (!state.attack) {
     root.innerHTML = `<div style="padding:20px;color:var(--muted)">Load ATT&amp;CK data first.</div>`;
     stats.innerHTML = "";
+    renderDetectionStrategies(null); // clears the summary
     return;
   }
-  const compScores = effectiveComponentScores(state.inventory, state.attack);
-  const cov = computeCoverage(state.attack, compScores);
+  const cov = runCoverage();
+  renderDetectionStrategies(cov);
 
+  const v2 = cov.engine === "v2";
+  const detectableSub = v2 ? "have detection strategies" : "have data-component detections";
   stats.innerHTML = `
     <div class="stat-card"><div class="label">Techniques (total)</div><div class="value">${cov.summary.total}</div></div>
-    <div class="stat-card"><div class="label">Detectable</div><div class="value">${cov.summary.detectable}</div><div class="sub">have data-component detections</div></div>
+    <div class="stat-card"><div class="label">Detectable</div><div class="value">${cov.summary.detectable}</div><div class="sub">${detectableSub}</div></div>
     <div class="stat-card"><div class="label">Covered</div><div class="value">${cov.summary.covered}</div><div class="sub">${pct(cov.summary.covered / Math.max(cov.summary.detectable,1))} of detectable</div></div>
     <div class="stat-card"><div class="label">Fully covered</div><div class="value">${cov.summary.fully}</div></div>
     <div class="stat-card"><div class="label">Partial</div><div class="value">${cov.summary.partial}</div></div>
@@ -666,7 +747,7 @@ $("#downloadDetectionsLayer")?.addEventListener("click", () => {
 
 function downloadThreatLayer(mode) {
   if (!state.attack) { setStatus("Load ATT&CK first", "error"); return; }
-  const cov = computeCoverage(state.attack, effectiveComponentScores(state.inventory, state.attack));
+  const cov = runCoverage();
   const rowsByStix = new Map(cov.rows.map(r => [r.stixId, r]));
   const layer = buildThreatLayer({ attack: state.attack, threats: state.threats, mode, coverageRowsByStixId: rowsByStix });
   if (!layer) { setStatus("Select at least one group first", "error"); return; }
@@ -743,7 +824,7 @@ function renderGapAnalysis() {
   const tableRoot = $("#threatTable");
   const statsRoot = $("#threatStats");
   if (!state.attack) return;
-  const cov = computeCoverage(state.attack, effectiveComponentScores(state.inventory, state.attack));
+  const cov = runCoverage();
   const rowsByStix = new Map(cov.rows.map(r => [r.stixId, r]));
   const gap = gapAnalysis(state.threats, state.attack, rowsByStix);
 
@@ -792,6 +873,22 @@ function statusLabel(s) { return ({ gap: "GAP", undetectable: "no-detect", parti
 $("#graphSourceSelect").addEventListener("change", e => { state.graph.sourceId = e.target.value; renderGraph(); });
 $("#graphMaxTech").addEventListener("change", e => { state.graph.maxTech = Math.max(1, Number(e.target.value) || 20); renderGraph(); });
 $("#graphOnlyCovered").addEventListener("change", e => { state.graph.onlyCovered = e.target.checked; renderGraph(); });
+
+// chunk 8: log-source utility picker
+$("#logSourcePickerFilter")?.addEventListener("input", e => {
+  state.graph.logSourceFilter = e.target.value.toLowerCase();
+  renderLogSourcePicker();
+});
+$("#logSourcePickerClear")?.addEventListener("click", () => {
+  state.graph.selectedLogSources.clear();
+  renderLogSourcePicker();
+  renderLogSourceCascade();
+});
+$("#logSourcePickerSelectVisible")?.addEventListener("click", () => {
+  for (const ls of visibleLogSourcesForPicker()) state.graph.selectedLogSources.add(ls.id);
+  renderLogSourcePicker();
+  renderLogSourceCascade();
+});
 $("#graphTechSearch").addEventListener("change", e => {
   if (!state.attack) return;
   const v = e.target.value.trim();
@@ -888,6 +985,93 @@ function renderGraph() {
 
   // Coverage overview
   renderMermaidInto(overviewHost, overviewDiagram({ attack: state.attack, componentScores: compScores }) || "");
+
+  // Log Source Utility cascade
+  renderLogSourcePicker();
+  renderLogSourceCascade();
+}
+
+// chunk 8: log-source picker. Returns the list of attack.logSources
+// matching the current filter. Used both for rendering and for
+// "Select all visible".
+function visibleLogSourcesForPicker() {
+  if (!state.attack) return [];
+  const filter = state.graph.logSourceFilter || "";
+  return state.attack.logSources.filter(ls => {
+    if (!filter) return true;
+    return (ls.name + "/" + (ls.channel || "")).toLowerCase().includes(filter);
+  });
+}
+
+// Render a checkbox-per-log-source list. Selected log sources persist
+// across re-renders via state.graph.selectedLogSources. The list is
+// scrollable so the diagram below stays in view.
+function renderLogSourcePicker() {
+  const root = $("#logSourcePicker");
+  if (!root) return;
+  if (!state.attack) {
+    root.innerHTML = `<div class="mermaid-empty" style="padding:8px">Load ATT&CK data first.</div>`;
+    return;
+  }
+  const visible = visibleLogSourcesForPicker();
+  const sel = state.graph.selectedLogSources;
+  $("#logSourcePickerCount").textContent = `${sel.size} selected`;
+  if (visible.length === 0) {
+    root.innerHTML = `<div class="mermaid-empty" style="padding:8px">No log sources match "${escapeHtml(state.graph.logSourceFilter)}".</div>`;
+    return;
+  }
+  const lsScores = effectiveLogSourceScores(state.inventory, state.attack);
+  let html = "";
+  for (const ls of visible) {
+    const checked = sel.has(ls.id) ? "checked" : "";
+    const score = lsScores.get(ls.id)?.score || 0;
+    const scoreCls = score > 0 ? "score-on" : "score-off";
+    html += `<label class="log-source-pick">
+      <input type="checkbox" data-ls-id="${escapeAttr(ls.id)}" ${checked} />
+      <strong>${escapeHtml(ls.name)}</strong>
+      <span style="color:var(--muted)">/ ${escapeHtml(ls.channel || "")}</span>
+      <span class="${scoreCls}">score ${score}</span>
+    </label>`;
+  }
+  root.innerHTML = html;
+  root.querySelectorAll("input[type=checkbox][data-ls-id]").forEach(box => {
+    box.addEventListener("change", () => {
+      const id = box.dataset.lsId;
+      if (box.checked) state.graph.selectedLogSources.add(id);
+      else state.graph.selectedLogSources.delete(id);
+      $("#logSourcePickerCount").textContent = `${state.graph.selectedLogSources.size} selected`;
+      renderLogSourceCascade();
+    });
+  });
+}
+
+// Render the cascade diagram. Smooth fade is driven by toggling a
+// `.rendering` class on the host before/after mermaid renders so users
+// see a brief opacity dip on each update instead of the diagram
+// snapping in place.
+function renderLogSourceCascade() {
+  const host = $("#diagramLogSourceCascade");
+  if (!host) return;
+  if (!state.attack) {
+    host.innerHTML = `<div class="mermaid-empty">Load ATT&CK data first.</div>`;
+    return;
+  }
+  if (state.graph.selectedLogSources.size === 0) {
+    host.innerHTML = `<div class="mermaid-empty">Pick log sources above to see what they unlock.</div>`;
+    return;
+  }
+  const lsScores = effectiveLogSourceScores(state.inventory, state.attack);
+  const source = logSourceCascadeDiagram({
+    attack: state.attack,
+    selectedLogSourceIds: state.graph.selectedLogSources,
+    logSourceScores: lsScores,
+    threats: state.threats,
+    analyticAggregation: state.filters.analyticAggregation || "min",
+  });
+  host.classList.add("rendering");
+  renderMermaidInto(host, source).finally(() => {
+    requestAnimationFrame(() => host.classList.remove("rendering"));
+  });
 }
 
 function populateGraphSelectors() {
@@ -925,8 +1109,7 @@ $("#copyLayerBtn").addEventListener("click", async () => {
 
 function currentLayer() {
   if (!state.attack) { setStatus("Load ATT&CK first", "error"); return null; }
-  const compScores = effectiveComponentScores(state.inventory, state.attack);
-  const cov = computeCoverage(state.attack, compScores);
+  const cov = runCoverage();
   return buildNavigatorLayer({
     coverage: cov,
     attack: state.attack,

@@ -1,15 +1,17 @@
-# ATT&CK Data Source Inventory
+# ATT&CK Log Source Inventory
 
 **Live demo:** https://dev-nobytes-io.github.io/Mitre-cti-log-to-detection/
 
-A static web app that walks you through five steps:
+A static web app that walks you through six steps:
 
 1. **MITRE CTI** — load the ATT&CK STIX bundle (or a local file).
-2. **Log Inventory** — score the data sources / log feeds you collect.
-3. **Detections** — what you can detect, derived from your inventory.
-4. **Threats** — pick the threat-actor groups you care about.
-5. **Gap Analysis** — cross-reference the threats' techniques against
-   your detections to surface coverage gaps.
+2. **Log Inventory** — score the log sources you collect (`(name, channel)` tuples like `sysmon/1`, `auditd/execve`, `okta/system`).
+3. **Data Components** — observe how your log sources roll up into components and which analytics they feed.
+4. **Detection Strategies** — see which `x-mitre-detection-strategy` objects light up against your inventory and which techniques they cover.
+5. **Threats** — pick the threat-actor groups you care about.
+6. **Coverage** — cross-reference the threats' techniques against your detections to surface coverage gaps.
+
+The chain is **Log Source → Data Component → Analytic → Detection Strategy → Technique**, matching the ATT&CK v18+/v19 model that retired the older "data source score" abstraction in October 2025.
 
 Built like [DeTT&CT](https://github.com/rabobank-cdc/DeTTECT) +
 [Dettectinator](https://github.com/siriussecurity/dettectinator) but
@@ -110,26 +112,22 @@ useful for offline use or for pinning to a specific ATT&CK version.
 
 ### 2. Inventory
 
-For every ATT&CK data source you have a *visibility score* (0–5). Component
-overrides let you say "I have great Process Creation but only fair Process
-Access." The inventory persists in `localStorage`.
+Score each log source — a `(name, channel)` tuple like `sysmon/1`, `auditd/execve`, or `okta/system` — from 0 (none) to 5 (excellent). Log sources are grouped by their parent data component so you can see what each contributes to. The inventory persists in `localStorage`.
 
-You can import / export the inventory as YAML or JSON. The YAML schema is
-the same as DeTT&CT's `data-source-administration` file (v1.2), so existing
-DeTT&CT YAMLs should round-trip. See `samples/inventory.example.yaml`.
+**Manual entry.** Click *+ Add log source by hand* to type in custom `(name, channel)` tuples — useful for vendor-specific event IDs, Sigma-style `product/category/service` strings, or any custom SIEM index. If the tuple matches a log source in the bundle, the score lands on that record and immediately drives coverage. Otherwise the entry shows up in the *Custom log sources* panel for your records and round-trips on YAML/JSON export.
+
+You can import / export the inventory as YAML or JSON. Exports use the v1.3 schema with a `log_sources:` block. Imports also accept the legacy DeTT&CT v1.2 `data_sources:` block — scores there are projected onto the matching log sources so old YAMLs round-trip cleanly. The bundled persona files (`samples/persona-*.yaml`) are all v2 examples ranging from a greenfield startup with EDR-only telemetry through a mature SOC with full Sysmon + Zeek coverage.
 
 ### 3. Coverage
 
-Each technique has zero or more data components that detect it (per the
-official STIX `detects` relationships). For each technique we compute:
+Each technique is reached via the chain `Log Source → Data Component → Analytic → Detection Strategy → Technique`. For each technique we compute:
 
-- **Coverage ratio**: covered detecting components / total detecting
-  components (0..1).
-- **Max source score**: best score across components that cover it (0..5).
-- **Weighted score**: `max_score × ratio` (0..5, fractional).
+- **Analytic lit?** An `x-mitre-analytic` is *lit* iff every log source it requires has score > 0. Score = aggregator over those scores (default `min` — chain-only-as-strong-as-the-weakest-log; toggle to `avg` for a lenient grade).
+- **Strategy lit?** A detection strategy is *lit* iff at least one of its analytics is lit. Score = max of lit analytic scores.
+- **Coverage ratio**: lit strategies / total strategies that detect this technique.
+- **Weighted score**: max strategy score among lit strategies (0..5).
 
-The technique table shows everything filterable by tactic, name, and
-coverage class.
+The technique table shows everything filterable by tactic, name, and coverage class.
 
 ### 4. Threats (gap analysis)
 
@@ -189,19 +187,20 @@ score, list of covering components) that Navigator surfaces on hover.
 ## Mapping logic — the short version
 
 ```
-data source ──has─▶ data component ──detects─▶ technique
-                          │
-                       (your visibility score)
+log source ──belongs to─▶ data component ──referenced by─▶ analytic
+                                                                │
+                                            x-mitre-detection-strategy
+                                                                │
+                                                          ─detects─▶ technique
 ```
 
-- ATT&CK data source = an information *category* (e.g., "Process").
-- ATT&CK data component = a sub-event of that source (e.g., "Process
-  Creation"). Components are what STIX `detects` relationships actually
-  point at.
-- Your inventory scores at the source level, with optional per-component
-  overrides. The app resolves the effective score for each component, then
-  scores each technique based on which of its detecting components you
-  have.
+- **Log source** (the unit you score): a `(name, channel)` tuple like `sysmon/1`. Lives inside `x-mitre-data-component.x_mitre_log_sources[]`.
+- **Data component**: an observable event class (e.g., "Process Creation"). Bundles the log sources that produce that observation.
+- **Analytic** (`x-mitre-analytic`): platform-specific detection logic referencing one or more log sources. Lit only when every required log source has score > 0.
+- **Detection strategy** (`x-mitre-detection-strategy`): a behavioural detection (DET0001 etc.) bundling one or more analytics. Lit when any analytic is lit.
+- **Technique** (attack-pattern): covered when any detecting strategy is lit.
+
+ATT&CK v18 (Oct 2025) retired the older "data source score" model in favour of this chain. Bundles still ship `x-mitre-data-source` objects as a categorical grouping, but scoring happens at the log-source level.
 
 ## Files
 

@@ -162,6 +162,155 @@ function renderBar(pct) {
   return "▰".repeat(filled) + "▱".repeat(empty);
 }
 
+// Log Source Utility cascade: shows what coverage a particular set of
+// log sources unlocks. Renders the v18+ chain top-to-bottom:
+//
+//   Log Sources -> Data Components -> Analytics -> Detection Strategies
+//      -> Techniques -> Threat Groups (using those techniques)
+//
+// Nodes are coloured by lit/unlit status so the diagram answers
+// the user-facing question "why am I logging eventcode 1 / 4624?":
+// each link upward shows the threat-intel value the log carries.
+//
+// Args:
+//   selectedLogSourceIds: Iterable<string>      log-source ids the user picked
+//   logSourceScores:      Map<id, {score,...}>  effective log-source scores (drives lit/unlit)
+//   threats:              optional state.threats — only the *selected* groups
+//                         are highlighted; if no groups selected, all groups
+//                         using each technique are shown.
+export function logSourceCascadeDiagram({ attack, selectedLogSourceIds, logSourceScores, threats, analyticAggregation = "min" }) {
+  const lsIds = Array.from(selectedLogSourceIds || []);
+  if (!attack || lsIds.length === 0) return null;
+
+  const aggregate = analyticAggregation === "avg"
+    ? (vs) => vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : 0
+    : (vs) => vs.length ? Math.min(...vs) : 0;
+
+  const lsSet = new Set(lsIds);
+  const lines = ["flowchart LR"];
+
+  // 1. Selected log sources
+  const lsNodes = [];
+  for (const lsId of lsIds) {
+    const ls = attack.logSourceById?.get(lsId);
+    if (!ls) continue;
+    const score = logSourceScores?.get(lsId)?.score || 0;
+    const cls = score > 0 ? "lsLit" : "lsUnlit";
+    const id = nodeId("LS", lsId);
+    lines.push(`  ${id}["${escape(ls.name)}<br/>${escape(ls.channel || "")}<br/><i>score ${score}</i>"]:::${cls}`);
+    lsNodes.push({ id, lsId, ls, score });
+  }
+
+  // 2. Data components fed by any of those log sources
+  const componentSet = new Map(); // compId -> { dc, contributingLsIds: Set }
+  for (const lsId of lsIds) {
+    const ls = attack.logSourceById?.get(lsId);
+    for (const cid of ls?.componentIds || []) {
+      if (!componentSet.has(cid)) componentSet.set(cid, { dc: attack.componentById?.get(cid), contributingLsIds: new Set() });
+      componentSet.get(cid).contributingLsIds.add(lsId);
+    }
+  }
+  for (const [cid, { dc, contributingLsIds }] of componentSet) {
+    if (!dc) continue;
+    const id = nodeId("DC", cid);
+    lines.push(`  ${id}["${escape(dc.name)}"]:::dc`);
+    for (const lsId of contributingLsIds) lines.push(`  ${nodeId("LS", lsId)} --> ${id}`);
+  }
+
+  // 3. Analytics that reference any of those components.
+  // An analytic is *lit* iff every one of its required log sources has
+  // score > 0. The diagram shades it green only on full coverage.
+  const analyticSet = new Set();
+  const analyticInfo = new Map(); // analyticId -> { lit, score, refs: [{lsId, score}] }
+  for (const an of attack.analytics || []) {
+    const refs = (an.logSourceIds || []).map(id => ({ lsId: id, score: logSourceScores?.get(id)?.score || 0 }));
+    const touchesSelection = refs.some(r => lsSet.has(r.lsId));
+    if (!touchesSelection) continue;
+    const lit = refs.length > 0 && refs.every(r => r.score > 0);
+    const score = lit ? aggregate(refs.map(r => r.score)) : 0;
+    analyticSet.add(an.id);
+    analyticInfo.set(an.id, { lit, score, refs, name: an.name });
+    const id = nodeId("AN", an.id);
+    const cls = lit ? "anLit" : "anUnlit";
+    lines.push(`  ${id}["${escape(truncate(an.name, 40))}<br/><i>${refs.filter(r => r.score > 0).length}/${refs.length} log sources lit · ${lit ? "score " + score.toFixed(1) : "unlit"}</i>"]:::${cls}`);
+    for (const cid of an.componentIds || []) {
+      if (componentSet.has(cid)) lines.push(`  ${nodeId("DC", cid)} --> ${id}`);
+    }
+  }
+
+  // 4. Detection strategies bundling those analytics
+  const strategySet = new Set();
+  const strategyInfo = new Map(); // strategyId -> { lit, score }
+  for (const st of attack.detectionStrategies || []) {
+    const myAns = (st.analyticIds || []).filter(id => analyticSet.has(id));
+    if (myAns.length === 0) continue;
+    const litAns = myAns.filter(id => analyticInfo.get(id)?.lit);
+    const lit = litAns.length > 0;
+    const score = lit ? Math.max(...litAns.map(id => analyticInfo.get(id).score)) : 0;
+    strategySet.add(st.id);
+    strategyInfo.set(st.id, { lit, score });
+    const id = nodeId("DS", st.id);
+    const cls = lit ? "dsLit" : "dsUnlit";
+    lines.push(`  ${id}["${escape(st.attackId || "")}<br/>${escape(truncate(st.name, 40))}<br/><i>${litAns.length}/${myAns.length} analytics lit</i>"]:::${cls}`);
+    for (const aid of myAns) lines.push(`  ${nodeId("AN", aid)} --> ${id}`);
+  }
+
+  // 5. Techniques detected by those strategies
+  const techniqueSet = new Set();
+  for (const sid of strategySet) {
+    const st = attack.detectionStrategyById?.get(sid);
+    for (const tid of st?.techniqueIds || []) techniqueSet.add(tid);
+  }
+  for (const tid of techniqueSet) {
+    const tech = attack.techniqueById?.get(tid);
+    if (!tech) continue;
+    const detectingStrats = (tech.strategyIds || []).filter(sid => strategySet.has(sid));
+    const litStrats = detectingStrats.filter(sid => strategyInfo.get(sid)?.lit);
+    const lit = litStrats.length > 0;
+    const id = nodeId("T", tid);
+    const cls = lit ? "techLit" : "techUnlit";
+    lines.push(`  ${id}["${escape(tech.attackId)}<br/>${escape(truncate(tech.name, 32))}"]:::${cls}`);
+    for (const sid of detectingStrats) lines.push(`  ${nodeId("DS", sid)} --> ${id}`);
+  }
+
+  // 6. Threat groups that use those techniques (highlighted by selection if any)
+  const selectedGroupIds = new Set(threats?.groups?.filter(g => g.selected).map(g => g.attackId) || []);
+  const groupSet = new Map(); // groupId -> { group, techIds: Set, selected: bool }
+  for (const tid of techniqueSet) {
+    const groupIds = attack.techniqueGroups?.get(tid) || new Set();
+    for (const gid of groupIds) {
+      const g = attack.groupById?.get(gid);
+      if (!g) continue;
+      if (!groupSet.has(gid)) groupSet.set(gid, { group: g, techIds: new Set(), selected: selectedGroupIds.has(g.attackId) });
+      groupSet.get(gid).techIds.add(tid);
+    }
+  }
+  // Cap rendered groups so the diagram stays readable; prefer selected groups.
+  const groupList = Array.from(groupSet.values());
+  groupList.sort((a, b) => Number(b.selected) - Number(a.selected) || b.techIds.size - a.techIds.size);
+  const renderedGroups = groupList.slice(0, 12);
+  for (const { group, techIds, selected } of renderedGroups) {
+    const id = nodeId("G", group.id);
+    const cls = selected ? "grpSel" : "grpAny";
+    lines.push(`  ${id}["${escape(group.attackId || "")}<br/>${escape(truncate(group.name, 24))}"]:::${cls}`);
+    for (const tid of techIds) lines.push(`  ${nodeId("T", tid)} --> ${id}`);
+  }
+  if (groupList.length > renderedGroups.length) {
+    const moreId = "Gmore";
+    lines.push(`  ${moreId}(["+${groupList.length - renderedGroups.length} more groups"]):::more`);
+    if (renderedGroups[0]) lines.push(`  ${nodeId("G", renderedGroups[0].group.id)} -.-> ${moreId}`);
+  }
+
+  // Empty-state fallbacks so the user gets meaningful feedback even when
+  // their selection produces no downstream nodes.
+  if (componentSet.size === 0) lines.push(`  none1["No data components fed by these log sources"]:::more`);
+  else if (analyticSet.size === 0) lines.push(`  none2["No analytics in this bundle reference these log sources yet"]:::more`);
+  else if (techniqueSet.size === 0) lines.push(`  none3["Strategies don't yet detect any techniques"]:::more`);
+
+  lines.push(cascadeClassDefs());
+  return lines.join("\n");
+}
+
 function classDefs() {
   return `
     classDef ds    fill:#1c2230,stroke:#2f81f7,color:#e6edf3;
@@ -174,6 +323,25 @@ function classDefs() {
     classDef rel   fill:#3b2c1d,stroke:#d29922,color:#fef3c7;
   `;
 }
+
+function cascadeClassDefs() {
+  return `
+    classDef lsLit   fill:#0e3a2a,stroke:#3fb950,color:#dcfce7,stroke-width:2px;
+    classDef lsUnlit fill:#3a2a0e,stroke:#d29922,color:#fef3c7,stroke-width:2px;
+    classDef dc      fill:#1d3b32,stroke:#3fb950,color:#e6edf3;
+    classDef anLit   fill:#0e3a2a,stroke:#3fb950,color:#dcfce7;
+    classDef anUnlit fill:#2a2f3a,stroke:#475569,color:#cbd5e1;
+    classDef dsLit   fill:#1d2b3b,stroke:#6ec1ff,color:#e6edf3,stroke-width:2px;
+    classDef dsUnlit fill:#1c1f26,stroke:#3a3f4a,color:#8b949e;
+    classDef techLit fill:#0e3a2a,stroke:#3fb950,color:#dcfce7;
+    classDef techUnlit fill:#1c1f26,stroke:#3a3f4a,color:#8b949e;
+    classDef grpSel  fill:#3b1d2b,stroke:#f85149,color:#fee2e2,stroke-width:2px;
+    classDef grpAny  fill:#2b1d3b,stroke:#a78bfa,color:#e6edf3;
+    classDef more    fill:#161b22,stroke:#30363d,color:#8b949e;
+  `;
+}
+
+
 
 function lookupSourceScore(ds, compScores) {
   for (const dc of ds.components) {

@@ -289,8 +289,45 @@ button.danger { color: var(--bad); border-color: var(--bad); }
   padding: 14px;
   overflow: auto;
   min-height: 80px;
+  transition: opacity 220ms ease, transform 220ms ease;
 }
-.mermaid-host svg { max-width: 100%; height: auto; }
+.mermaid-host svg { max-width: 100%; height: auto; transition: opacity 220ms ease; }
+.mermaid-host.rendering { opacity: 0.45; transform: scale(0.995); }
+
+/* chunk 8: log-source picker for the utility cascade diagram */
+.log-source-picker {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  background: var(--panel);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 4px 12px;
+  margin-bottom: 12px;
+}
+.log-source-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.log-source-pick:hover { background: rgba(255,255,255,0.04); }
+.log-source-pick input[type=checkbox] { margin: 0; }
+.log-source-pick .score-on  { color: #3fb950; font-size: 11px; margin-left: auto; }
+.log-source-pick .score-off { color: var(--muted); font-size: 11px; margin-left: auto; }
+.muted-pill {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+}
 .mermaid-host .mermaid-empty { color: var(--muted); font-size: 12px; padding: 8px 0; }
 .mermaid-host .mermaid-error {
   color: var(--bad);
