@@ -91,7 +91,7 @@ export function selectedGroups(threats, attack) {
 export function gapAnalysis(threats, attack, coverageRowsByStixId) {
   const groups = selectedGroups(threats, attack);
   if (!groups.length) {
-    return { groups: [], threatTechniques: [], summary: { totalThreats: 0, covered: 0, partial: 0, gaps: 0, undetectable: 0 } };
+    return { groups: [], threatTechniques: [], summary: { totalThreats: 0, covered: 0, partial: 0, gaps: 0, undetectable: 0, riskAccepted: 0 } };
   }
   const techIdToGroups = new Map();
   for (const g of groups) {
@@ -108,8 +108,12 @@ export function gapAnalysis(threats, attack, coverageRowsByStixId) {
     const weighted = cov ? cov.weightedScore : 0;
     const ratio = cov ? cov.ratio : 0;
     const detectable = cov ? cov.hasDetections : false;
+    const riskAccepted = !!(cov && cov.riskAccepted);
+    // chunk 10: risk-accepted wins over gap so users see the
+    // acknowledged-gap bucket distinct from "true uncovered."
     let status;
-    if (!detectable) status = "undetectable";
+    if (riskAccepted) status = "risk_accepted";
+    else if (!detectable) status = "undetectable";
     else if (weighted <= 0) status = "gap";
     else if (ratio >= 1) status = "covered";
     else status = "partial";
@@ -120,11 +124,12 @@ export function gapAnalysis(threats, attack, coverageRowsByStixId) {
       weightedScore: weighted,
       ratio,
       hasDetections: detectable,
+      riskAccepted,
       status,
     });
   }
   rows.sort((a, b) => {
-    const order = { gap: 0, undetectable: 1, partial: 2, covered: 3 };
+    const order = { gap: 0, undetectable: 1, partial: 2, risk_accepted: 3, covered: 4 };
     if (order[a.status] !== order[b.status]) return order[a.status] - order[b.status];
     if (b.groupCount !== a.groupCount) return b.groupCount - a.groupCount;
     return (a.tech.attackId || "").localeCompare(b.tech.attackId || "");
@@ -135,6 +140,7 @@ export function gapAnalysis(threats, attack, coverageRowsByStixId) {
     partial: rows.filter(r => r.status === "partial").length,
     gaps: rows.filter(r => r.status === "gap").length,
     undetectable: rows.filter(r => r.status === "undetectable").length,
+    riskAccepted: rows.filter(r => r.status === "risk_accepted").length,
   };
   return { groups, threatTechniques: rows, summary };
 }

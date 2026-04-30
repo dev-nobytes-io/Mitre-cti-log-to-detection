@@ -4,6 +4,7 @@ import {
   effectiveComponentScores, setSourceScore, setComponentScore, setAllSources,
   effectiveLogSourceScores, setLogSourceScore, setAllLogSources, removeLogSource,
   setLogSourceEnabled,
+  setRiskAccepted, isRiskAccepted, logSourceRiskKey,
   exportYaml, importYaml, exportJson, importJson,
 } from "./inventory.js";
 import { computeCoverage } from "./coverage.js";
@@ -752,7 +753,10 @@ function runCoverage() {
   return computeCoverage(
     state.attack,
     effectiveLogSourceScores(state.inventory, state.attack),
-    { analyticAggregation: state.filters.analyticAggregation || "min" },
+    {
+      analyticAggregation: state.filters.analyticAggregation || "min",
+      riskAccepted: state.inventory.risk_accepted || null,
+    },
   );
 }
 
@@ -852,6 +856,7 @@ function renderCoverage() {
     <div class="stat-card"><div class="label">Covered</div><div class="value">${cov.summary.covered}</div><div class="sub">${pct(cov.summary.covered / Math.max(cov.summary.detectable,1))} of detectable</div></div>
     <div class="stat-card"><div class="label">Fully covered</div><div class="value">${cov.summary.fully}</div></div>
     <div class="stat-card"><div class="label">Partial</div><div class="value">${cov.summary.partial}</div></div>
+    <div class="stat-card"><div class="label">Risk accepted</div><div class="value">${cov.summary.riskAccepted || 0}</div><div class="sub">acknowledged gaps</div></div>
     <div class="stat-card"><div class="label">Avg score (covered)</div><div class="value">${cov.summary.avgScore.toFixed(2)}</div></div>
   `;
 
@@ -872,25 +877,30 @@ function renderCoverage() {
     if (fCov === "covered" && r.weightedScore <= 0) return false;
     if (fCov === "partial" && !(r.ratio > 0 && r.ratio < 1)) return false;
     if (fCov === "full" && r.ratio < 1) return false;
-    if (fCov === "uncovered" && r.weightedScore > 0) return false;
+    if (fCov === "uncovered" && (r.weightedScore > 0 || r.riskAccepted)) return false;
+    if (fCov === "risk_accepted" && !r.riskAccepted) return false;
     return true;
   });
 
   let html = `<div class="tech-row header">
-    <div>ID</div><div>Technique</div><div>Tactics</div><div>Coverage</div><div>Score</div>
+    <div>ID</div><div>Technique</div><div>Tactics</div><div>Coverage</div><div>Score / Risk</div>
   </div>`;
   for (const r of rows.slice(0, 1500)) {
     const fillPct = Math.round(r.ratio * 100);
+    const riskCls = r.riskAccepted ? " risk-accepted" : "";
     html += `
-      <div class="tech-row" title="${escapeAttr(`${r.coveredComponents}/${r.totalDetectingComponents} detecting components covered`)}">
+      <div class="tech-row${riskCls}" title="${escapeAttr(`${r.coveredComponents}/${r.totalDetectingComponents} detecting components covered`)}">
         <div class="tech-id">${escapeHtml(r.attackId)}</div>
-        <div>${escapeHtml(r.name)}${r.isSubtechnique ? ' <span style="color:var(--muted);font-size:11px">sub</span>' : ""}</div>
+        <div>${escapeHtml(r.name)}${r.isSubtechnique ? ' <span style="color:var(--muted);font-size:11px">sub</span>' : ""}${r.riskAccepted ? ' <span class="risk-accepted-tag" title="Risk accepted">✓ risk accepted</span>' : ""}</div>
         <div class="tech-tactics">${escapeHtml(r.tactics.join(", "))}</div>
         <div>
           <div class="coverage-bar"><div class="fill" style="width:${fillPct}%"></div></div>
           <div style="font-size:11px;color:var(--muted);margin-top:2px">${r.coveredComponents}/${r.totalDetectingComponents} (${fillPct}%)</div>
         </div>
-        <div><span class="score-badge s${Math.round(r.weightedScore)}">${r.weightedScore.toFixed(2)}</span></div>
+        <div>
+          <span class="score-badge s${Math.round(r.weightedScore)}">${r.weightedScore.toFixed(2)}</span>
+          <button class="risk-toggle" data-risk-tech="${escapeAttr(r.attackId)}" title="${r.riskAccepted ? "Un-accept risk" : "Accept risk for this technique"}">${r.riskAccepted ? "↺" : "✓"}</button>
+        </div>
       </div>
     `;
   }
@@ -898,6 +908,17 @@ function renderCoverage() {
     html += `<div class="tech-row"><div></div><div style="color:var(--muted)">Showing first 1500 of ${rows.length} matches; refine filters.</div><div></div><div></div><div></div></div>`;
   }
   root.innerHTML = html;
+
+  // Wire per-technique risk-accept toggle
+  root.querySelectorAll("[data-risk-tech]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-risk-tech");
+      const accepted = !isRiskAccepted(state.inventory, "techniques", id);
+      setRiskAccepted(state.inventory, "techniques", id, accepted);
+      saveInventory(state.inventory);
+      refreshAll();
+    });
+  });
 }
 
 // --- Threats tab ---
@@ -1035,6 +1056,7 @@ function renderGapAnalysis() {
     <div class="stat-card"><div class="label">Partial</div><div class="value">${gap.summary.partial}</div></div>
     <div class="stat-card"><div class="label">Gaps</div><div class="value" style="color:var(--bad)">${gap.summary.gaps}</div><div class="sub">no coverage</div></div>
     <div class="stat-card"><div class="label">Undetectable</div><div class="value" style="color:var(--warn)">${gap.summary.undetectable}</div><div class="sub">no detections defined</div></div>
+    <div class="stat-card"><div class="label">Risk accepted</div><div class="value">${gap.summary.riskAccepted || 0}</div><div class="sub">acknowledged gaps</div></div>
   `;
 
   const fStatus = state.filters.threatStatus;
