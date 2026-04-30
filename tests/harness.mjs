@@ -120,11 +120,23 @@ export async function readInventorySummary(page) {
   });
 }
 
-// Number of inventory rows whose score select is non-zero.
+// Number of inventory rows whose score select is non-zero. Covers both the
+// v2 log-source view (default, data-kind='ls') and the v1 legacy data-source
+// view (data-kind='ds') so this helper stays meaningful regardless of which
+// mode the UI is in.
 export async function countScoredInventoryRows(page) {
   return await page.evaluate(() => {
     let n = 0;
-    document.querySelectorAll("#inventoryTable .ds-row:not(.header) select[data-kind='ds']").forEach(s => { if (Number(s.value) > 0) n++; });
+    document.querySelectorAll("#inventoryTable select[data-kind='ds'], #inventoryTable select[data-kind='ls']").forEach(s => { if (Number(s.value) > 0) n++; });
+    return n;
+  });
+}
+
+// v2-only: count log-source rows whose score select is non-zero.
+export async function countScoredLogSourceRows(page) {
+  return await page.evaluate(() => {
+    let n = 0;
+    document.querySelectorAll("#inventoryTable select[data-kind='ls']").forEach(s => { if (Number(s.value) > 0) n++; });
     return n;
   });
 }

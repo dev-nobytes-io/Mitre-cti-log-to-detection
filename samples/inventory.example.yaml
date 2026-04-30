@@ -1,9 +1,28 @@
-version: 1.2
+version: 1.3
 file_type: data-source-administration
 name: Example inventory
 systems:
   - applicable_to: all
     description: Default system
+
+# --- v2 (ATT&CK v18+) primary unit: log sources ---
+# (name, channel) tuples. Score 0..5 for the quality of telemetry you
+# collect. Log sources flow up to data components, analytics, and
+# detection strategies.
+log_sources:
+  - { name: sysmon,           channel: "1",     score: 5, comment: "Process Creation w/ parent + cmdline + hash" }
+  - { name: sysmon,           channel: "3",     score: 4, comment: "Network Connection Creation" }
+  - { name: sysmon,           channel: "11",    score: 3, comment: "File Creation" }
+  - { name: sysmon,           channel: "10",    score: 2, comment: "Process Access (lsass watch)" }
+  - { name: powershell,       channel: "4104",  score: 5, comment: "ScriptBlock logging org-wide" }
+  - { name: windows-security, channel: "4624",  score: 5, comment: "Successful logon" }
+  - { name: windows-security, channel: "4625",  score: 5, comment: "Failed logon" }
+  - { name: windows-security, channel: "4688",  score: 4, comment: "Process auditing" }
+  - { name: zeek,             channel: "conn",  score: 4, comment: "Egress flow logs" }
+
+# --- v1 legacy block: data-source / component scores ---
+# Still imported for backward compatibility. Both blocks coexist; max
+# wins per component so adopting v2 doesn't drop coverage.
 data_sources:
   - data_source_name: Process
     applicable_to: ["all"]
