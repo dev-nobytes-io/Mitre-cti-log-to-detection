@@ -476,16 +476,27 @@ footer {
   label { width: 100%; }
   label input, label select { width: 100%; }
 
-  /* Inventory rows -> simple stacked block */
+  /* Inventory rows -> stacked cards with clear borders. Score selects
+     are auto-width (the previous 100%-wide selects swallowed the
+     viewport and pushed everything else below the fold). */
   .ds-list { overflow: visible; }
-  .ds-row, .dc-row, .tech-row, .group-row { display: block !important; padding: 10px 12px; }
+  .ds-row, .dc-row, .tech-row, .group-row {
+    display: block !important;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+  }
   .ds-row.header, .tech-row.header, .group-row.header { display: none !important; }
   .ds-row { position: relative; padding-left: 36px; }
-  .ds-row .toggle { position: absolute; left: 8px; top: 10px; padding: 2px 4px; }
+  .ds-row .toggle { position: absolute; left: 8px; top: 10px; padding: 2px 4px; font-size: 16px; }
   .ds-row > div { margin-bottom: 6px; }
   .ds-row > div:last-child { margin-bottom: 0; }
-  .ds-row .ds-meta, .dc-row .dc-meta { font-size: 12px; color: var(--muted); }
-  .ds-row select, .dc-row select { width: 100%; }
+  .ds-row .ds-meta, .dc-row .dc-meta { font-size: 12px; color: var(--muted); line-height: 1.4; }
+  .ds-row select, .dc-row select, .tech-row select {
+    width: auto;
+    min-width: 110px;
+    max-width: 200px;
+    margin-top: 2px;
+  }
   .ds-components { padding: 8px 14px 8px 36px; }
 
   .tech-row { padding: 10px 12px; }
@@ -493,6 +504,18 @@ footer {
   .tech-row > div:last-child { margin-bottom: 0; }
   .tech-id { font-size: 13px; font-weight: 600; }
   .tech-tactics { font-size: 11px; }
+  .tech-row .coverage-bar { max-width: 220px; }
+
+  /* Inventory summary pills: 2 columns at narrow widths. Default
+     auto-fit minmax(160px,1fr) at 390px tries to squeeze 4 columns
+     and the result is unreadable. */
+  .inv-summary { grid-template-columns: 1fr 1fr; gap: 6px; }
+  .inv-summary .pill { padding: 8px 10px; min-width: 0; }
+
+  /* Cascade picker on the Diagrams tab: full-width rows with proper
+     touch height. */
+  .log-source-picker { grid-template-columns: 1fr; max-height: 280px; }
+  .log-source-pick { padding: 8px 6px; min-height: 38px; font-size: 13px; }
 
   .group-row { padding: 10px 12px 10px 36px; position: relative; }
   .group-row > input[type=checkbox] { position: absolute; left: 10px; top: 12px; width: 18px; height: 18px; }

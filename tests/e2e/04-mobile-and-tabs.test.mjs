@@ -1,6 +1,6 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { newPage, bootApp, activateTab, closeBrowser } from "../harness.mjs";
+import { newPage, bootApp, activateTab, importInventory, closeBrowser } from "../harness.mjs";
 
 after(async () => { await closeBrowser(); });
 
@@ -118,6 +118,50 @@ test("Diagrams tab: log source utility cascade renders when log sources are pick
   await page.waitForTimeout(150);
   placeholder = await page.evaluate(() => document.querySelector("#diagramLogSourceCascade")?.textContent || "");
   assert.match(placeholder, /Pick log sources/, `cleared cascade should return to empty state, got: ${placeholder}`);
+
+  await page.context().close();
+});
+
+test("mobile (390px): importing a sample renders readable inventory rows without horizontal overflow", async () => {
+  // chunk M1: regression coverage for the user-reported "I see nothing
+  // on mobile after loading sample data" bug. Asserts that on a phone-
+  // width viewport, after importing a sample inventory:
+  //   - the inventory table has rendered text (not blank)
+  //   - at least one .ds-row has positive size (not display:none / zero)
+  //   - the inventory-summary pills render in 2 columns at 390px
+  //   - there's no horizontal overflow (rows fit the viewport)
+  const page = await newPage({ viewport: { width: 390, height: 844 }, blockExternal: true });
+  await bootApp(page);
+  await activateTab(page, "inventory");
+
+  await importInventory(page, "inventory.example.yaml");
+  await page.waitForTimeout(150);
+
+  const result = await page.evaluate(() => {
+    const table = document.querySelector("#inventoryTable");
+    // Skip .header rows (they're hidden on mobile by design)
+    const firstRow = Array.from(document.querySelectorAll("#inventoryTable .ds-row")).find(r => !r.classList.contains("header"));
+    const firstRowBox = firstRow?.getBoundingClientRect();
+    const pills = Array.from(document.querySelectorAll("#inventorySummary .pill"));
+    // Group pills by their top-coordinate so we can check the column count
+    // (grid auto-flow drops items onto the same row when they have equal `top`).
+    const tops = new Set(pills.map(p => Math.round(p.getBoundingClientRect().top)));
+    const overflow = document.documentElement.scrollWidth - document.documentElement.clientWidth;
+    return {
+      tableLen: (table?.textContent || "").trim().length,
+      firstRowVisible: !!firstRowBox && firstRowBox.height > 0 && firstRowBox.width > 0,
+      pillCount: pills.length,
+      pillRowCount: tops.size,
+      overflow,
+    };
+  });
+
+  assert.ok(result.tableLen > 100, `inventory table should have rendered text after import, got ${result.tableLen} chars`);
+  assert.ok(result.firstRowVisible, "first .ds-row should be visible (height > 0, width > 0)");
+  assert.ok(result.pillCount >= 4, `expected 4 summary pills, got ${result.pillCount}`);
+  // 4 pills at 2-per-row = 2 rows; assert pills wrap to at most 2 rows on a 390px viewport.
+  assert.ok(result.pillRowCount <= 2, `expected pills to fit in <=2 rows on mobile, got ${result.pillRowCount}`);
+  assert.equal(result.overflow, 0, `no horizontal overflow expected, got ${result.overflow}px`);
 
   await page.context().close();
 });
