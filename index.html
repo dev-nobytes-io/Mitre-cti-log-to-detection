@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ATT&amp;CK Data Source Inventory</title>
+  <title>ATT&amp;CK Log Source Inventory</title>
   <link rel="stylesheet" href="css/styles.css" />
   <script src="vendor/js-yaml.min.js" defer></script>
   <script src="vendor/mermaid.min.js" defer></script>
@@ -12,7 +12,7 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <h1>ATT&amp;CK Data Source Inventory</h1>
+      <h1>ATT&amp;CK Log Source Inventory</h1>
       <p class="subtitle">MITRE CTI &rarr; log inventory &rarr; data components &rarr; detection strategies &rarr; threats &rarr; coverage</p>
     </div>
     <div class="status" id="status">
@@ -103,7 +103,7 @@
         </div>
       </details>
       <div class="row">
-        <input type="search" id="dsFilter" placeholder="Filter data sources&hellip;" />
+        <input type="search" id="dsFilter" placeholder="Filter log sources&hellip;" />
         <select id="platformFilter">
           <option value="">All platforms</option>
         </select>
@@ -324,7 +324,7 @@
           <ul>
             <li><strong>Conceptual model</strong> — abstract diagram of how a raw log becomes a Navigator score. No interaction.</li>
             <li><strong>Log source utility cascade</strong> — the most useful one. Pick log sources from the multi-select; the diagram renders <em>Log Source → Component → Analytic → Detection Strategy → Technique → Threat Group</em>. Lit (green) nodes are fully covered by your inventory; dim/yellow are blocked because at least one upstream log source is unscored. Use it to communicate <em>why</em> a particular event-code matters.</li>
-            <li><strong>Data source / technique drill-down</strong> — pick a data source or technique to see its components and detections.</li>
+            <li><strong>Component category / technique drill-down</strong> — pick a component category or technique to see its components and detections.</li>
           </ul>
           <p><strong>Capabilities:</strong> log-source multi-select with filter + "Select all visible", per-technique drill-down, smooth-fade re-renders. Diagrams scroll horizontally on phones.</p>
         </div>
@@ -347,10 +347,10 @@
       <div id="logSourcePicker" class="log-source-picker"></div>
       <div class="mermaid-host" id="diagramLogSourceCascade"></div>
 
-      <h3 class="diagram-h">Data source &rarr; components &rarr; techniques</h3>
+      <h3 class="diagram-h">Component category &rarr; components &rarr; techniques</h3>
       <div class="row">
-        <label>Data source
-          <select id="graphSourceSelect"><option value="">Select a data source…</option></select>
+        <label>Component category
+          <select id="graphSourceSelect"><option value="">Select a component category…</option></select>
         </label>
         <label>Max techniques per component
           <input type="number" id="graphMaxTech" min="1" max="100" value="20" />
@@ -369,7 +369,7 @@
       <div class="mermaid-host" id="diagramTechnique"></div>
 
       <h3 class="diagram-h">Coverage overview (top sources)</h3>
-      <p class="diagram-help">Top 12 data sources by total detections; bar shows your covered / total ratio.</p>
+      <p class="diagram-help">Top 12 component categories by total detections; bar shows your covered / total ratio.</p>
       <div class="mermaid-host" id="diagramOverview"></div>
     </section>
 
@@ -393,7 +393,7 @@
       </details>
       <div class="row">
         <label>Layer name <input type="text" id="layerName" value="Data source coverage" /></label>
-        <label>Description <input type="text" id="layerDesc" value="Detection coverage from data source inventory" /></label>
+        <label>Description <input type="text" id="layerDesc" value="Detection coverage from log source inventory" /></label>
       </div>
       <div class="row">
         <label>Min score colour <input type="color" id="colorMin" value="#ffe0b3" /></label>

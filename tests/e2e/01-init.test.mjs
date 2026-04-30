@@ -20,11 +20,46 @@ test("offline ATT&CK auto-loads on first visit (no cache)", async () => {
   const page = await newPage({ blockExternal: true });
   await bootApp(page);
   const status = await page.locator("#statusText").innerText();
-  assert.match(status, /Loaded \d+ data sources/, `expected status to say loaded, got: ${status}`);
-  // Should pull the offline bundle: 38 data sources, 38 techniques, 20 groups
-  assert.match(status, /38 data sources/);
+  assert.match(status, /Loaded \d+ component categories/, `expected status to say loaded, got: ${status}`);
+  // Should pull the offline bundle: 38 component categories, 38 techniques, 20 groups
+  assert.match(status, /38 component categories/);
   assert.match(status, /38 techniques/);
   assert.match(status, /20 groups/);
+  await page.context().close();
+});
+
+test("UI no longer surfaces 'data source' user-facing strings (chunk 15)", async () => {
+  // chunk 15: every visible label should use log-source / component
+  // category / analytic / detection-strategy terminology. Internal
+  // STIX type names (x-mitre-data-source) and the DeTT&CT YAML
+  // file_type identifier ("data-source-administration") stay — those
+  // are interop strings, not UX.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  // Header h1 + page title
+  const headers = await page.evaluate(() => ({
+    title: document.title,
+    h1: document.querySelector(".brand h1")?.textContent || "",
+    statusText: document.querySelector("#statusText")?.textContent || "",
+  }));
+  assert.match(headers.title, /Log Source/, `page title should mention 'Log Source', got: ${headers.title}`);
+  assert.match(headers.h1, /Log Source/, `header h1 should mention 'Log Source', got: ${headers.h1}`);
+  assert.doesNotMatch(headers.title, /Data Source/, `page title should not mention 'Data Source', got: ${headers.title}`);
+  // Status banner after auto-load
+  assert.match(headers.statusText, /component categor/i, `status should report categories, got: ${headers.statusText}`);
+  // Sweep all visible body text for forbidden phrases. Allow the
+  // singular "data component" (a real ATT&CK concept we still use)
+  // but ban the deprecated user-facing "data source" string.
+  const offenders = await page.evaluate(() => {
+    const re = /\bdata source(s)?\b/i;
+    const out = [];
+    document.querySelectorAll("h1, h2, h3, p, summary, label, button, .pill, .label, .stat-card .label, option, .ds-meta, .dc-meta").forEach(el => {
+      const text = (el.textContent || "").trim();
+      if (re.test(text)) out.push(text.slice(0, 120));
+    });
+    return out;
+  });
+  assert.deepEqual(offenders, [], `no user-visible 'data source' strings expected, got: ${JSON.stringify(offenders)}`);
   await page.context().close();
 });
 
@@ -75,11 +110,11 @@ test("blocked MITRE fetch shows a warn banner and offline data still loads", asy
   await bootApp(page);
   // Boot already fell back to offline; verify ATT&CK data is populated
   // and the banner explains what happened.
-  const dataSources = await page.evaluate(() => {
+  const componentCategories = await page.evaluate(() => {
     const summary = document.querySelector("#setupSummary")?.innerText || "";
-    const m = summary.match(/Data sources\s*(\d+)/);
+    const m = summary.match(/Component categories\s*(\d+)/);
     return m ? Number(m[1]) : 0;
   });
-  assert.equal(dataSources, 38, `expected 38 offline data sources to be loaded, got ${dataSources}`);
+  assert.equal(componentCategories, 38, `expected 38 offline component categories to be loaded, got ${componentCategories}`);
   await page.context().close();
 });

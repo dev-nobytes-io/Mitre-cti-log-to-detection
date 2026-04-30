@@ -5,7 +5,7 @@
 export function conceptualDiagram() {
   return `flowchart LR
     log[/"Raw log<br/>(EDR, Sysmon, firewall…)"/]:::raw
-    src["ATT&CK Data Source<br/>e.g. Process"]:::ds
+    src["ATT&CK Component Category<br/>e.g. Process"]:::ds
     cmp["ATT&CK Data Component<br/>e.g. Process Creation"]:::dc
     rel{{"detects relationship<br/>(STIX)"}}:::rel
     tech["ATT&CK Technique<br/>e.g. T1059"]:::tech
@@ -135,7 +135,7 @@ export function overviewDiagram({ attack, componentScores, topN = 12 }) {
 
   // Use a flowchart with bar-like nodes — xychart-beta is finicky and not as readable for this.
   const lines = ["flowchart TB"];
-  lines.push(`  title["Detection breadth: covered / total techniques per data source"]:::title`);
+  lines.push(`  title["Detection breadth: covered / total techniques per component category"]:::title`);
   for (const r of ranked) {
     const id = nodeId("OV", r.name);
     const pct = r.total ? Math.round((r.covered / r.total) * 100) : 0;

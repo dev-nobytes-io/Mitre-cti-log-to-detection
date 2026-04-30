@@ -60,7 +60,7 @@ export async function bootApp(page) {
   await page.goto(`${ORIGIN}/`, { waitUntil: "networkidle" });
   await page.waitForFunction(() => {
     const s = document.querySelector("#statusText")?.textContent || "";
-    return /Loaded \d+ data sources/.test(s) || /failed/i.test(s) || /Couldn't/i.test(s);
+    return /Loaded \d+ (data sources|component categories)/.test(s) || /failed/i.test(s) || /Couldn't/i.test(s);
   }, { timeout: 15_000 });
   // Give renderInventory a tick to flush
   await page.waitForTimeout(150);
