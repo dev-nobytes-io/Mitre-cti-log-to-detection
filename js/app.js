@@ -35,8 +35,9 @@ const state = {
     group: "",
     threatStatus: "",
     analyticAggregation: "min", // how to aggregate log-source scores into an analytic score (V2 chain)
-    inventoryGrouping: "name", // chunk 9: 'name' (group by log-source name) or 'component' (legacy by-data-component view)
+    inventoryGrouping: "picker", // chunk 18: 'picker' (flat list, default) | 'name' (chunk 9 by-name groups) | 'component' (chunk 7 legacy by-data-component view)
     customLsCompFilter: "", // chunk 13: filter for the component picker on the manual-entry form
+    invPickerFilter: "", // chunk 18: filter for the inventory picker view
   },
   // chunk 13: which data components the user has selected for the
   // custom log source they're about to add. Persists across opens of
@@ -228,6 +229,31 @@ document.querySelectorAll('input[name="inventoryGrouping"]').forEach(r => {
   });
 });
 
+// chunk 18: picker view filter + bulk-enable / bulk-disable
+$("#invPickerFilter")?.addEventListener("input", e => { state.filters.invPickerFilter = e.target.value.toLowerCase(); renderInventory(); });
+$("#invPickerSelectVisible")?.addEventListener("click", () => {
+  if (!state.attack) return;
+  const filter = state.filters.invPickerFilter || "";
+  for (const ls of state.attack.logSources) {
+    const hay = (ls.name + "/" + (ls.channel || "")).toLowerCase();
+    if (filter && !hay.includes(filter)) continue;
+    setLogSourceEnabled(state.inventory, ls.name, ls.channel, true);
+  }
+  saveInventory(state.inventory);
+  refreshAll();
+});
+$("#invPickerClearVisible")?.addEventListener("click", () => {
+  if (!state.attack) return;
+  const filter = state.filters.invPickerFilter || "";
+  for (const ls of state.attack.logSources) {
+    const hay = (ls.name + "/" + (ls.channel || "")).toLowerCase();
+    if (filter && !hay.includes(filter)) continue;
+    setLogSourceEnabled(state.inventory, ls.name, ls.channel, false);
+  }
+  saveInventory(state.inventory);
+  refreshAll();
+});
+
 // Manual log-source entry. Lets the user type a (name, channel) tuple
 // the bundle doesn't know about — e.g. a vendor-specific event ID, a
 // Sigma-style logsource string, or a custom SIEM index. When the tuple
@@ -416,10 +442,133 @@ function renderInventory() {
     `;
   }
 
+  // chunk 18: render the activation strip + show picker controls
+  // when in picker mode.
+  renderActivationStrip(lsScores, compScores);
+  const pickerControls = $("#inventoryPickerControls");
+  if (pickerControls) pickerControls.hidden = state.filters.inventoryGrouping !== "picker";
+
   if (state.filters.inventoryGrouping === "component") {
     return renderLogSourceInventory(root, compScores, lsScores);
   }
-  return renderInventoryByName(root, lsScores);
+  if (state.filters.inventoryGrouping === "name") {
+    return renderInventoryByName(root, lsScores);
+  }
+  return renderInventoryPicker(root, lsScores, compScores);
+}
+
+// chunk 18: live cascade-counts strip on the Log Inventory tab.
+// Shows how many log sources are enabled, how many components those
+// activate, and how many detection strategies light up. Updates on
+// every render so users see cause-and-effect immediately.
+function renderActivationStrip(lsScores, compScores) {
+  const strip = $("#inventoryActivationStrip");
+  if (!strip) return;
+  if (!state.attack) { strip.innerHTML = ""; return; }
+  const lsEnabled = (state.inventory.log_sources || []).filter(e => e.enabled !== false && Number(e.score) > 0).length;
+  const compsActive = Array.from(compScores.values()).filter(v => v.score > 0).length;
+  // Use the V2 coverage engine's strategy-lit count via runCoverage.
+  const cov = runCoverage();
+  const stratsLit = (cov?.rows || []).reduce((acc, r) => acc + (r.litStrategies || 0), 0);
+  const litUniqueStrats = new Set();
+  for (const r of cov?.rows || []) for (const c of r.contributing || []) if (c.lit) litUniqueStrats.add(c.id);
+  const techsCovered = (cov?.summary?.covered) || 0;
+  strip.innerHTML = `
+    <div class="strip-cell strip-ls"><strong>${lsEnabled}</strong><span>log sources enabled</span></div>
+    <div class="strip-arrow">→</div>
+    <div class="strip-cell strip-comp"><strong>${compsActive}</strong><span>components activated</span></div>
+    <div class="strip-arrow">→</div>
+    <div class="strip-cell strip-strat"><strong>${litUniqueStrats.size}</strong><span>strategies lit</span></div>
+    <div class="strip-arrow">→</div>
+    <div class="strip-cell strip-tech"><strong>${techsCovered}</strong><span>techniques covered</span></div>
+  `;
+}
+
+// chunk 18: flat-list picker view. One row per (name, channel) tuple
+// in the bundle. Each row carries an enable checkbox, name+channel,
+// score select (only visible when enabled), comment input, and a
+// component-fed badge. Bulk-enable / bulk-disable via the controls
+// at the top of the panel.
+function renderInventoryPicker(root, lsScores, compScores) {
+  const filter = state.filters.invPickerFilter || "";
+  const rows = state.attack.logSources.filter(ls => {
+    if (!filter) return true;
+    return (ls.name + "/" + (ls.channel || "")).toLowerCase().includes(filter);
+  });
+  // Add custom (user-added) log sources as their own rows so they're
+  // editable from the picker too.
+  const knownKeys = new Set(state.attack.logSources.map(ls => ((ls.name || "") + "|" + (ls.channel || "")).toLowerCase()));
+  const customRows = (state.inventory.log_sources || []).filter(e => {
+    const k = ((e.name || "") + "|" + (e.channel || "")).toLowerCase();
+    if (knownKeys.has(k)) return false;
+    if (filter && !((e.name || "") + "/" + (e.channel || "")).toLowerCase().includes(filter)) return false;
+    return true;
+  });
+
+  const totalEnabled = (state.inventory.log_sources || []).filter(e => e.enabled !== false && Number(e.score) > 0).length;
+  const cnt = $("#invPickerCount");
+  if (cnt) cnt.textContent = `${totalEnabled} enabled`;
+
+  let html = `<div class="picker-row picker-header">
+    <div></div><div>Log source</div><div>Channel</div><div>Score</div><div>Comment</div><div>Feeds</div>
+  </div>`;
+
+  const renderRow = (name, channel, key, savedEntry, isCustom) => {
+    const eff = lsScores.get(key) || {};
+    const enabled = savedEntry ? savedEntry.enabled !== false : false;
+    const score = savedEntry ? clampInt(savedEntry.score) : (eff.savedScore || 0);
+    const comment = savedEntry?.comment || "";
+    const feeds = (savedEntry?.component_refs || []).length;
+    const compFeeds = isCustom ? feeds : (state.attack.logSources.find(l => l.name === name && l.channel === channel)?.componentIds?.length || 0);
+    return `<div class="picker-row${enabled ? " enabled" : " disabled"}${isCustom ? " custom" : ""}" data-pick-key="${escapeAttr(`${name}||${channel}`)}">
+      <div><label class="enable-toggle"><input type="checkbox" data-pick-enable="${escapeAttr(`${name}||${channel}`)}" ${enabled ? "checked" : ""} /></label></div>
+      <div><strong>${escapeHtml(name)}</strong>${isCustom ? ' <span style="color:var(--muted);font-size:11px">(custom)</span>' : ""}</div>
+      <div style="color:var(--muted)">${escapeHtml(channel || "")}</div>
+      <div>${enabled ? scoreSelect(score, "ls", `${name}||${channel}`) : '<span class="picker-disabled-hint">enable to score</span>'}</div>
+      <div><input type="text" class="picker-comment" data-pick-comment="${escapeAttr(`${name}||${channel}`)}" value="${escapeAttr(comment)}" placeholder="optional" /></div>
+      <div style="color:var(--muted);font-size:11px">${compFeeds} comp${compFeeds === 1 ? "" : "s"}</div>
+    </div>`;
+  };
+
+  for (const ls of rows) {
+    const k = ((ls.name || "") + "|" + (ls.channel || "")).toLowerCase();
+    const saved = (state.inventory.log_sources || []).find(e => ((e.name || "") + "|" + (e.channel || "")).toLowerCase() === k);
+    html += renderRow(ls.name, ls.channel, ls.id, saved, false);
+  }
+  for (const e of customRows) {
+    html += renderRow(e.name, e.channel, `custom:${(e.name || "") + "|" + (e.channel || "")}`, e, true);
+  }
+  if (rows.length === 0 && customRows.length === 0) {
+    html += `<div style="padding:12px;color:var(--muted)">No log sources match "${escapeHtml(filter)}".</div>`;
+  }
+  root.innerHTML = html;
+
+  root.querySelectorAll("input[data-pick-enable]").forEach(box => {
+    box.addEventListener("change", () => {
+      const [name, channel] = box.dataset.pickEnable.split("||");
+      setLogSourceEnabled(state.inventory, name, channel, box.checked);
+      saveInventory(state.inventory);
+      refreshAll();
+    });
+  });
+  root.querySelectorAll("select[data-kind='ls']").forEach(sel => {
+    sel.addEventListener("change", () => {
+      const [name, channel] = sel.dataset.key.split("||");
+      setLogSourceScore(state.inventory, name, channel, Number(sel.value));
+      saveInventory(state.inventory);
+      refreshAll();
+    });
+  });
+  root.querySelectorAll("input[data-pick-comment]").forEach(inp => {
+    inp.addEventListener("change", () => {
+      const [name, channel] = inp.dataset.pickComment.split("||");
+      const entry = (state.inventory.log_sources || []).find(e => ((e.name || "") + "|" + (e.channel || "")).toLowerCase() === ((name || "") + "|" + (channel || "")).toLowerCase());
+      if (entry) {
+        entry.comment = inp.value.trim();
+        saveInventory(state.inventory);
+      }
+    });
+  });
 }
 
 // v2 Log-Source inventory view (default). Renders log sources grouped by

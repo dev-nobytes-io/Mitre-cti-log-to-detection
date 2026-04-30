@@ -135,6 +135,10 @@ test("mobile (390px): importing a sample renders readable inventory rows without
   await activateTab(page, "inventory");
 
   await importInventory(page, "inventory.example.yaml");
+  // chunk 18: picker is now the default view. The original test
+  // asserted on .ds-row visibility (the by-name view); switch back so
+  // the same assertion still validates the mobile inventory layout.
+  await page.click('input[name="inventoryGrouping"][value="name"]');
   await page.waitForTimeout(150);
 
   const result = await page.evaluate(() => {
