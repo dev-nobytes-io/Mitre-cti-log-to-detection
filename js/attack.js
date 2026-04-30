@@ -1,4 +1,6 @@
-// Loads and indexes a MITRE ATT&CK STIX 2.x bundle from github.com/mitre/cti.
+// Loads and indexes a MITRE ATT&CK STIX 2.x bundle from
+// github.com/mitre-attack/attack-stix-data (the canonical v18+ feed; the
+// legacy github.com/mitre/cti mirror is being phased out).
 // Exposes:
 //   loadAttack({domain, url, signal, onProgress}) -> AttackData
 //   loadAttackFromBundle(bundle) -> AttackData
@@ -6,7 +8,7 @@
 //
 // Caches the raw bundle in IndexedDB keyed by domain+version.
 
-const CTI_BASE = "https://raw.githubusercontent.com/mitre/cti/master";
+const CTI_BASE = "https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master";
 const OFFLINE_BUNDLE_URL = "vendor/attack-offline.json";
 const DB_NAME = "attack-cache";
 const DB_STORE = "bundles";

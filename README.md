@@ -16,10 +16,11 @@ Built like [DeTT&CT](https://github.com/rabobank-cdc/DeTTECT) +
 all in the browser — no install, no backend.
 
 It pulls ATT&CK STIX data straight from
-[github.com/mitre/cti](https://github.com/mitre/cti), maps your data
-components to techniques via the official STIX `detects` relationships, and
-emits a Navigator layer JSON you can drop into the
-[ATT&CK Navigator](https://mitre-attack.github.io/attack-navigator/).
+[github.com/mitre-attack/attack-stix-data](https://github.com/mitre-attack/attack-stix-data)
+(the canonical v18+ feed; the legacy `github.com/mitre/cti` mirror is being
+phased out), maps your data components to techniques via the official STIX
+`detects` relationships, and emits a Navigator layer JSON you can drop into
+the [ATT&CK Navigator](https://mitre-attack.github.io/attack-navigator/).
 
 ## Why another tool?
 
@@ -101,7 +102,7 @@ provider at this repo with no build command.
 
 On the **Load ATT&CK** tab, pick a domain (`enterprise-attack`,
 `mobile-attack`, `ics-attack`) and click *Load / Refresh*. The bundle is
-fetched from `https://raw.githubusercontent.com/mitre/cti/master/<domain>/<domain>.json`
+fetched from `https://raw.githubusercontent.com/mitre-attack/attack-stix-data/master/<domain>/<domain>.json`
 and cached in IndexedDB so subsequent visits are instant.
 
 You can also drop a local STIX bundle JSON via *Load local STIX file* —
