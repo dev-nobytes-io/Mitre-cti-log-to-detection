@@ -140,6 +140,12 @@
           <option value="full">Full (ratio = 1)</option>
           <option value="uncovered">Uncovered</option>
         </select>
+        <label>Analytic score
+          <select id="analyticAggregation" title="How to aggregate log-source scores into an analytic score (V2 chain only)">
+            <option value="min" selected>min (weakest log)</option>
+            <option value="avg">avg (lenient)</option>
+          </select>
+        </label>
       </div>
       <div class="row">
         <button id="downloadDetectionsLayer" class="primary">Download detections Navigator layer</button>

@@ -5,7 +5,7 @@ import {
   effectiveLogSourceScores, setLogSourceScore, setAllLogSources,
   exportYaml, importYaml, exportJson, importJson,
 } from "./inventory.js";
-import { computeCoverage } from "./coverage.js";
+import { computeCoverage, computeCoverageV2 } from "./coverage.js";
 import { buildNavigatorLayer } from "./navigator.js";
 import { conceptualDiagram, sourceDiagram, techniqueDiagram, overviewDiagram } from "./diagrams.js";
 import {
@@ -31,6 +31,7 @@ const state = {
     group: "",
     threatStatus: "",
     legacyView: false, // chunk 3: log sources are the new primary unit; data-source view kept behind a toggle
+    analyticAggregation: "min", // chunk 4: how to aggregate log-source scores into an analytic score
   },
   expanded: new Set(),
   graph: {
@@ -555,10 +556,30 @@ function getSourceScore(ds) {
   return entry ? Number(entry.score) || 0 : 0;
 }
 
+// Run the active coverage engine. V2 wins whenever the loaded ATT&CK
+// bundle exposes detection strategies (modern v18+ data); otherwise we
+// fall back to the legacy data-component chain so older bundles or
+// custom STIX uploads keep working.
+function runCoverage() {
+  if (!state.attack) return null;
+  if ((state.attack.detectionStrategies?.length || 0) > 0) {
+    return computeCoverageV2(
+      state.attack,
+      effectiveLogSourceScores(state.inventory, state.attack),
+      { analyticAggregation: state.filters.analyticAggregation || "min" },
+    );
+  }
+  return computeCoverage(
+    state.attack,
+    effectiveComponentScores(state.inventory, state.attack),
+  );
+}
+
 // --- Coverage tab ---
 $("#techFilter").addEventListener("input", e => { state.filters.tech = e.target.value.toLowerCase(); renderCoverage(); });
 $("#tacticFilter").addEventListener("change", e => { state.filters.tactic = e.target.value; renderCoverage(); });
 $("#coverageFilter").addEventListener("change", e => { state.filters.coverage = e.target.value; renderCoverage(); });
+$("#analyticAggregation")?.addEventListener("change", e => { state.filters.analyticAggregation = e.target.value; refreshAll(); });
 
 function renderCoverage() {
   const root = $("#techniqueTable");
@@ -568,12 +589,13 @@ function renderCoverage() {
     stats.innerHTML = "";
     return;
   }
-  const compScores = effectiveComponentScores(state.inventory, state.attack);
-  const cov = computeCoverage(state.attack, compScores);
+  const cov = runCoverage();
 
+  const v2 = cov.engine === "v2";
+  const detectableSub = v2 ? "have detection strategies" : "have data-component detections";
   stats.innerHTML = `
     <div class="stat-card"><div class="label">Techniques (total)</div><div class="value">${cov.summary.total}</div></div>
-    <div class="stat-card"><div class="label">Detectable</div><div class="value">${cov.summary.detectable}</div><div class="sub">have data-component detections</div></div>
+    <div class="stat-card"><div class="label">Detectable</div><div class="value">${cov.summary.detectable}</div><div class="sub">${detectableSub}</div></div>
     <div class="stat-card"><div class="label">Covered</div><div class="value">${cov.summary.covered}</div><div class="sub">${pct(cov.summary.covered / Math.max(cov.summary.detectable,1))} of detectable</div></div>
     <div class="stat-card"><div class="label">Fully covered</div><div class="value">${cov.summary.fully}</div></div>
     <div class="stat-card"><div class="label">Partial</div><div class="value">${cov.summary.partial}</div></div>
@@ -666,7 +688,7 @@ $("#downloadDetectionsLayer")?.addEventListener("click", () => {
 
 function downloadThreatLayer(mode) {
   if (!state.attack) { setStatus("Load ATT&CK first", "error"); return; }
-  const cov = computeCoverage(state.attack, effectiveComponentScores(state.inventory, state.attack));
+  const cov = runCoverage();
   const rowsByStix = new Map(cov.rows.map(r => [r.stixId, r]));
   const layer = buildThreatLayer({ attack: state.attack, threats: state.threats, mode, coverageRowsByStixId: rowsByStix });
   if (!layer) { setStatus("Select at least one group first", "error"); return; }
@@ -743,7 +765,7 @@ function renderGapAnalysis() {
   const tableRoot = $("#threatTable");
   const statsRoot = $("#threatStats");
   if (!state.attack) return;
-  const cov = computeCoverage(state.attack, effectiveComponentScores(state.inventory, state.attack));
+  const cov = runCoverage();
   const rowsByStix = new Map(cov.rows.map(r => [r.stixId, r]));
   const gap = gapAnalysis(state.threats, state.attack, rowsByStix);
 
@@ -925,8 +947,7 @@ $("#copyLayerBtn").addEventListener("click", async () => {
 
 function currentLayer() {
   if (!state.attack) { setStatus("Load ATT&CK first", "error"); return null; }
-  const compScores = effectiveComponentScores(state.inventory, state.attack);
-  const cov = computeCoverage(state.attack, compScores);
+  const cov = runCoverage();
   return buildNavigatorLayer({
     coverage: cov,
     attack: state.attack,
