@@ -2,6 +2,7 @@ import { loadAttack, loadAttackFromBundle, clearAttackCache, loadOfflineBundle }
 import {
   loadInventory, saveInventory, resetInventory,
   effectiveComponentScores, setSourceScore, setComponentScore, setAllSources,
+  effectiveLogSourceScores, setLogSourceScore, setAllLogSources,
   exportYaml, importYaml, exportJson, importJson,
 } from "./inventory.js";
 import { computeCoverage } from "./coverage.js";
@@ -29,6 +30,7 @@ const state = {
     coverage: "",
     group: "",
     threatStatus: "",
+    legacyView: false, // chunk 3: log sources are the new primary unit; data-source view kept behind a toggle
   },
   expanded: new Set(),
   graph: {
@@ -204,6 +206,7 @@ function populateTacticFilter() {
 $("#dsFilter").addEventListener("input", e => { state.filters.ds = e.target.value.toLowerCase(); renderInventory(); });
 $("#platformFilter").addEventListener("change", e => { state.filters.platform = e.target.value; renderInventory(); });
 $("#onlyScored")?.addEventListener("change", e => { state.filters.onlyScored = e.target.checked; renderInventory(); });
+$("#legacyView")?.addEventListener("change", e => { state.filters.legacyView = e.target.checked; renderInventory(); });
 $("#componentFilter")?.addEventListener("input", e => { state.filters.component = e.target.value.toLowerCase(); renderComponents(); });
 $("#componentScoreFilter")?.addEventListener("change", e => { state.filters.componentScore = e.target.value; renderComponents(); });
 $("#setAllBtn").addEventListener("click", () => {
@@ -246,11 +249,15 @@ $("#inventoryFile").addEventListener("change", async ev => {
 
     const counts = inventoryStats(state.inventory);
     refreshAll();
-    if (counts.sources === 0) {
-      setStatus(`Imported ${file.name} but it had no data sources`, "error");
+    if (counts.sources === 0 && counts.logSources === 0) {
+      setStatus(`Imported ${file.name} but it had no log sources or data sources`, "error");
     } else {
-      setStatus(`Imported ${file.name}: ${counts.sources} sources, ${counts.overrides} component overrides`, "ok");
-      setBanner(`Imported <strong>${escapeHtml(file.name)}</strong>: ${counts.sources} data sources, ${counts.overrides} component overrides. Switch to <a href="#" data-goto="components">Data Components</a> or <a href="#" data-goto="coverage">Detection Strategies</a> to see the impact.`, "ok");
+      const parts = [];
+      if (counts.logSources) parts.push(`${counts.logSources} log sources`);
+      if (counts.sources) parts.push(`${counts.sources} data sources`);
+      if (counts.overrides) parts.push(`${counts.overrides} component overrides`);
+      setStatus(`Imported ${file.name}: ${parts.join(", ")}`, "ok");
+      setBanner(`Imported <strong>${escapeHtml(file.name)}</strong>: ${parts.join(", ")}. Switch to <a href="#" data-goto="components">Data Components</a> or <a href="#" data-goto="coverage">Detection Strategies</a> to see the impact.`, "ok");
       $("#globalBanner")?.querySelectorAll('[data-goto]').forEach(a => a.addEventListener("click", e => { e.preventDefault(); activateTab(a.dataset.goto); }));
     }
   } catch (e) {
@@ -265,7 +272,9 @@ $("#inventoryFile").addEventListener("change", async ev => {
 function inventoryStats(inv) {
   const sources = (inv.data_sources || []).length;
   const overrides = (inv.data_sources || []).reduce((n, e) => n + (e.data_source?.length || 0), 0);
-  return { sources, overrides };
+  const logSources = (inv.log_sources || []).length;
+  const scoredLogSources = (inv.log_sources || []).filter(e => Number(e.score) > 0).length;
+  return { sources, overrides, logSources, scoredLogSources };
 }
 $("#exportInventoryYaml").addEventListener("click", () => {
   downloadText(exportYaml(state.inventory), "inventory.yaml", "text/yaml");
@@ -282,26 +291,128 @@ function renderInventory() {
     if (summary) summary.innerHTML = "";
     return;
   }
-  const filterText = state.filters.ds;
-  const filterPlatform = state.filters.platform;
-  const onlyScored = !!state.filters.onlyScored;
 
   const compScores = effectiveComponentScores(state.inventory, state.attack);
+  const lsScores = effectiveLogSourceScores(state.inventory, state.attack);
 
-  // Inventory summary across the WHOLE attack model (not affected by filters)
+  // Inventory summary spans the whole attack model (filter-independent).
   const totalSources = state.attack.dataSources.length;
   const scoredSources = state.attack.dataSources.filter(ds => getSourceScore(ds) > 0).length;
   const totalComps = state.attack.dataComponents.length;
   const scoredComps = Array.from(compScores.values()).filter(v => v.score > 0).length;
+  const totalLogSources = state.attack.logSources?.length || 0;
+  const scoredLogSources = Array.from(lsScores.values()).filter(v => v.score > 0).length;
   if (summary) {
-    summary.className = "inv-summary" + (scoredSources > 0 ? " populated" : "");
+    summary.className = "inv-summary" + ((scoredLogSources + scoredSources) > 0 ? " populated" : "");
     summary.innerHTML = `
+      <div class="pill"><strong>${scoredLogSources} / ${totalLogSources}</strong>log sources scored</div>
       <div class="pill"><strong>${scoredSources} / ${totalSources}</strong>data sources scored</div>
       <div class="pill"><strong>${scoredComps} / ${totalComps}</strong>data components covered</div>
-      <div class="pill"><strong>${state.inventory.data_sources?.length || 0}</strong>entries in saved inventory</div>
       <div class="pill"><strong>${state.inventory.name || "Default"}</strong>inventory name</div>
     `;
   }
+
+  if (state.filters.legacyView) {
+    return renderLegacyDataSourceInventory(root, compScores);
+  }
+  return renderLogSourceInventory(root, compScores, lsScores);
+}
+
+// v2 Log-Source inventory view (default). Renders log sources grouped by
+// their parent data component; each row has a 0-5 score select that flows
+// into inv.log_sources[]. Components inherit the max log-source score
+// (computed by effectiveComponentScores).
+function renderLogSourceInventory(root, compScores, lsScores) {
+  const filterText = state.filters.ds;
+  const filterPlatform = state.filters.platform;
+  const onlyScored = !!state.filters.onlyScored;
+
+  const sources = state.attack.dataSources.filter(ds => {
+    if (filterText && !(ds.name.toLowerCase().includes(filterText) || ds.attackId?.toLowerCase().includes(filterText))) return false;
+    if (filterPlatform && !ds.platforms.includes(filterPlatform)) return false;
+    if (onlyScored) {
+      const anyLs = ds.components.some(c => (c.logSourceIds || []).some(id => (lsScores.get(id)?.score || 0) > 0));
+      if (!anyLs) return false;
+    }
+    return true;
+  });
+
+  let html = `<div class="ds-row header">
+    <div></div><div>Log source / Data component</div><div>Coverage</div><div>Score</div>
+  </div>`;
+
+  for (const ds of sources) {
+    const expanded = state.expanded.has(ds.id);
+    const allLsIds = ds.components.flatMap(c => c.logSourceIds || []);
+    const lsTotal = new Set(allLsIds).size;
+    const lsCovered = new Set(allLsIds.filter(id => (lsScores.get(id)?.score || 0) > 0)).size;
+    html += `
+      <div class="ds-row" data-ds-id="${escapeAttr(ds.id)}">
+        <div class="toggle" data-toggle="${escapeAttr(ds.id)}">${expanded ? "▾" : "▸"}</div>
+        <div>
+          <div class="ds-name">${escapeHtml(ds.name)} <span style="color:var(--muted);font-weight:400">${escapeHtml(ds.attackId || "")}</span></div>
+          <div class="ds-meta">${escapeHtml(ds.platforms.join(", ") || "—")} · ${lsCovered}/${lsTotal} log sources scored</div>
+        </div>
+        <div class="ds-meta">${ds.components.length} component${ds.components.length === 1 ? "" : "s"}</div>
+        <div class="ds-meta">${lsTotal} feed${lsTotal === 1 ? "" : "s"}</div>
+      </div>
+      <div class="ds-components ${expanded ? "open" : ""}" data-components-for="${escapeAttr(ds.id)}">
+        ${ds.components.map(dc => {
+          const compEff = compScores.get(dc.id);
+          const compScore = compEff?.score ?? 0;
+          const lsList = (dc.logSourceIds || []).map(id => state.attack.logSourceById?.get(id)).filter(Boolean);
+          const compHeader = `<div class="dc-row">
+            <div>
+              <div class="dc-name">${escapeHtml(dc.name)} <span style="color:var(--muted);font-weight:400">(component)</span></div>
+              <div class="dc-meta">${dc.techniqueIds.length} technique${dc.techniqueIds.length === 1 ? "" : "s"} · effective score ${compScore}</div>
+            </div>
+            <div class="dc-meta">${lsList.length} log source${lsList.length === 1 ? "" : "s"}</div>
+            <div class="dc-meta">${compEff?.hasOverride ? "(scored)" : "(none)"}</div>
+          </div>`;
+          const lsRows = lsList.map(ls => {
+            const eff = lsScores.get(ls.id);
+            const score = eff?.score ?? 0;
+            return `<div class="dc-row" style="padding-left:24px">
+              <div>
+                <div class="dc-name">${escapeHtml(ls.name)} <span style="color:var(--muted);font-weight:400">/ ${escapeHtml(ls.channel || "")}</span></div>
+                <div class="dc-meta">${eff?.hasV2Override ? "user-set" : "projected from data-source score"}</div>
+              </div>
+              <div class="dc-meta">${ls.componentIds?.length || 0} comp${(ls.componentIds?.length || 0) === 1 ? "" : "s"}</div>
+              <div>${scoreSelect(score, "ls", `${ls.name}||${ls.channel || ""}`)}</div>
+            </div>`;
+          }).join("");
+          return compHeader + lsRows;
+        }).join("") || `<div class="dc-meta">No components defined.</div>`}
+      </div>
+    `;
+  }
+  root.innerHTML = html;
+
+  root.querySelectorAll("[data-toggle]").forEach(el => {
+    el.addEventListener("click", () => {
+      const id = el.getAttribute("data-toggle");
+      if (state.expanded.has(id)) state.expanded.delete(id);
+      else state.expanded.add(id);
+      renderInventory();
+    });
+  });
+  root.querySelectorAll("select[data-kind='ls']").forEach(sel => {
+    sel.addEventListener("change", () => {
+      const [name, channel] = sel.dataset.key.split("||");
+      setLogSourceScore(state.inventory, name, channel, Number(sel.value));
+      saveInventory(state.inventory);
+      refreshAll();
+    });
+  });
+}
+
+// v1 legacy view: score data sources / components directly. Kept behind
+// the "Show legacy data-source view" toggle so users with old DeTT&CT
+// inventories can still drive the same scoring path.
+function renderLegacyDataSourceInventory(root, compScores) {
+  const filterText = state.filters.ds;
+  const filterPlatform = state.filters.platform;
+  const onlyScored = !!state.filters.onlyScored;
 
   const sources = state.attack.dataSources.filter(ds => {
     if (filterText && !(ds.name.toLowerCase().includes(filterText) || ds.attackId?.toLowerCase().includes(filterText))) return false;

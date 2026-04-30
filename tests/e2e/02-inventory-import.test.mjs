@@ -1,6 +1,6 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { newPage, bootApp, activateTab, importInventory, readInventorySummary, countScoredInventoryRows, closeBrowser } from "../harness.mjs";
+import { newPage, bootApp, activateTab, importInventory, readInventorySummary, countScoredInventoryRows, countScoredLogSourceRows, closeBrowser } from "../harness.mjs";
 
 after(async () => { await closeBrowser(); });
 
@@ -47,6 +47,42 @@ for (const { file, minScored, minComponents } of PERSONAS) {
     await page.context().close();
   });
 }
+
+test("v2: importing inventory.example.yaml exposes scored log_sources block", async () => {
+  // chunk 3: the inventory schema gained a log_sources[] block. The example
+  // file ships explicit (sysmon/1, powershell/4104, etc.) entries with
+  // non-zero scores. Assert that:
+  //   - the inventory summary surfaces a non-zero "log sources scored" pill
+  //   - the v2 default view renders >0 scored log-source selects
+  //   - flipping into legacy view still works (toggle wired up)
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  await activateTab(page, "inventory");
+  await importInventory(page, "inventory.example.yaml");
+
+  const summary = await readInventorySummary(page);
+  const lsScored = summary["log sources scored"];
+  assert.ok(lsScored, `summary missing 'log sources scored', got: ${JSON.stringify(summary)}`);
+  const [lsN] = lsScored.split("/").map(s => Number(s.trim()));
+  assert.ok(lsN >= 5, `expected >=5 explicitly-scored log sources, got ${lsN}`);
+
+  // Expand every parent so the nested log-source selects are in the DOM.
+  await page.evaluate(() => {
+    document.querySelectorAll("#inventoryTable [data-toggle]").forEach(el => el.click());
+  });
+  await page.waitForTimeout(150);
+
+  const lsRows = await countScoredLogSourceRows(page);
+  assert.ok(lsRows >= 5, `expected >=5 scored log-source selects in v2 view, got ${lsRows}`);
+
+  // Toggle legacy view — selects should switch to data-kind='ds'.
+  await page.click("#legacyView");
+  await page.waitForTimeout(150);
+  const dsKindCount = await page.evaluate(() => document.querySelectorAll("#inventoryTable select[data-kind='ds']").length);
+  assert.ok(dsKindCount > 0, `legacy view should render data-source selects, got ${dsKindCount}`);
+
+  await page.context().close();
+});
 
 test("importing the same file twice via the same input control still works (input value reset)", async () => {
   const page = await newPage({ blockExternal: true });

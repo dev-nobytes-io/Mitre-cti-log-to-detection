@@ -71,7 +71,7 @@
 
     <section class="panel" id="tab-inventory" role="tabpanel">
       <h2>2. Log Inventory</h2>
-      <p>Score each ATT&amp;CK data source you collect (0 = none, 5 = excellent). Components inherit the source's score unless overridden. Saved to your browser automatically.</p>
+      <p>Score each log source you collect (0 = none, 5 = excellent). Log sources roll up to data components and on through analytics → detection strategies → techniques. Saved to your browser automatically.</p>
       <div class="row">
         <input type="search" id="dsFilter" placeholder="Filter data sources&hellip;" />
         <select id="platformFilter">
@@ -103,7 +103,8 @@
       </div>
       <div id="inventorySummary" class="inv-summary"></div>
       <div class="row">
-        <label class="checkbox-row"><input type="checkbox" id="onlyScored" /> Show only scored data sources</label>
+        <label class="checkbox-row"><input type="checkbox" id="onlyScored" /> Show only scored entries</label>
+        <label class="checkbox-row"><input type="checkbox" id="legacyView" /> Show legacy data-source view</label>
         <button id="resetInventoryBtn" class="danger">Reset</button>
       </div>
       <div id="inventoryTable" class="ds-list"></div>
