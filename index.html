@@ -106,6 +106,26 @@
         <label class="checkbox-row"><input type="checkbox" id="onlyScored" /> Show only scored entries</label>
         <button id="resetInventoryBtn" class="danger">Reset</button>
       </div>
+      <details id="customLsForm" class="custom-ls-form">
+        <summary>+ Add log source by hand (event ID / channel / SIEM-specific)</summary>
+        <p class="diagram-help">Useful when your tool emits a log under a different name than the bundle's defaults — e.g. <code>winlogbeat / Security/4688</code>, <code>edr-vendor / process_creation</code>, or a Sigma-style <code>product/category/service</code>. If the (name, channel) matches a log source the bundle already knows about, your score lands on that record and immediately drives coverage. Otherwise it's stored as a custom entry so you can keep track of it.</p>
+        <div class="row">
+          <label>Name <input type="text" id="customLsName" placeholder="sysmon, okta, custom-edr…" /></label>
+          <label>Channel / event ID <input type="text" id="customLsChannel" placeholder="4688, system, process_creation…" /></label>
+          <label>Score
+            <select id="customLsScore">
+              <option value="0">0 - None</option>
+              <option value="1">1 - Poor</option>
+              <option value="2">2 - Fair</option>
+              <option value="3" selected>3 - Good</option>
+              <option value="4">4 - Very good</option>
+              <option value="5">5 - Excellent</option>
+            </select>
+          </label>
+          <label>Comment <input type="text" id="customLsComment" placeholder="optional context" /></label>
+          <button id="customLsAdd" class="primary">Add</button>
+        </div>
+      </details>
       <div id="inventoryTable" class="ds-list"></div>
     </section>
 

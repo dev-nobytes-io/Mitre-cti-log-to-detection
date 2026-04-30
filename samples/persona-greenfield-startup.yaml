@@ -5,90 +5,34 @@
 # instrumentation, no cloud audit beyond the default AWS CloudTrail
 # trail nobody reads. Use this as the "before" picture against which
 # the mature-enterprise persona is the "after". Lots of red on the
-# Navigator heatmap — useful to drive a conversation about what
+# Navigator heatmap -- useful to drive a conversation about what
 # additional sources would unlock the most coverage.
 # ------------------------------------------------------------------
-version: 1.2
+version: 1.3
 file_type: data-source-administration
 name: Greenfield startup
 systems:
   - applicable_to: all
     description: 30 employees, MacOS + Windows laptops, AWS prod
 
-data_sources:
-  - data_source_name: Process
-    score: 3
-    comment: CrowdStrike Falcon on every laptop
-    data_source:
-      - { name: Process Creation,    score: 4, comment: "EDR process events" }
-      - { name: Process Termination, score: 3, comment: "" }
-      - { name: Process Metadata,    score: 3, comment: "" }
-      - { name: Process Access,      score: 1, comment: "EDR-derived, sparse" }
-      - { name: OS API Execution,    score: 2, comment: "EDR-derived" }
+log_sources:
+  # ---- EDR-derived telemetry on every laptop (CrowdStrike Falcon) ----
+  # Falcon emits the equivalent of these channels — score reflects what
+  # we can actually query / pivot on, not what the agent can theoretically
+  # produce.
+  - { name: sysmon, channel: "1",  score: 4, comment: "Falcon process events" }
+  - { name: sysmon, channel: "5",  score: 3, comment: "Process termination" }
+  - { name: sysmon, channel: "10", score: 1, comment: "Process Access (Falcon-derived, sparse)" }
+  - { name: sysmon, channel: "7",  score: 2, comment: "Module Load (Falcon-derived)" }
+  - { name: sysmon, channel: "11", score: 3, comment: "File Create" }
+  - { name: sysmon, channel: "3",  score: 2, comment: "Network Connection (host-side only)" }
 
-  - data_source_name: Command
-    score: 3
-    data_source:
-      - { name: Command Execution, score: 3, comment: "EDR cmdline capture" }
+  # ---- Linux dev boxes with auditd defaults ----
+  - { name: auditd, channel: execve, score: 2, comment: "Default audit rules, not centralized" }
+  - { name: auditd, channel: WRITE,  score: 1, comment: "Sparse" }
 
-  - data_source_name: File
-    score: 2
-    data_source:
-      - { name: File Creation,     score: 3, comment: "EDR file events" }
-      - { name: File Modification, score: 2, comment: "" }
-      - { name: File Deletion,     score: 1, comment: "" }
-      - { name: File Metadata,     score: 1, comment: "" }
-      - { name: File Access,       score: 0, comment: "" }
+  # ---- AWS CloudTrail enabled but unmonitored ----
+  - { name: aws-cloudtrail, channel: management, score: 1, comment: "Default trail, not shipped to a SIEM" }
 
-  - data_source_name: Module
-    score: 2
-    data_source:
-      - { name: Module Load, score: 2, comment: "EDR module load" }
-
-  - data_source_name: Network Traffic
-    score: 1
-    comment: Only what EDR observes from the host
-    data_source:
-      - { name: Network Connection Creation, score: 2, comment: "EDR network events" }
-      - { name: Network Traffic Flow,        score: 1, comment: "" }
-      - { name: Network Traffic Content,     score: 0, comment: "" }
-
-  - data_source_name: Logon Session
-    score: 1
-    data_source:
-      - { name: Logon Session Creation, score: 1, comment: "EDR logon hints, no AAA aggregation" }
-
-  - data_source_name: User Account
-    score: 1
-    comment: AWS Console + Google Workspace, neither shipped to a SIEM
-    data_source:
-      - { name: User Account Authentication, score: 1, comment: "Google Workspace audit (queried ad-hoc)" }
-      - { name: User Account Creation,       score: 1, comment: "" }
-
-  - data_source_name: Cloud Service
-    score: 1
-    data_source:
-      - { name: Cloud Service Modification, score: 1, comment: "CloudTrail enabled but unmonitored" }
-      - { name: Cloud Service Enumeration,  score: 0, comment: "" }
-
-  # Explicitly zero — visualizes what's missing
-  - data_source_name: Windows Registry
-    score: 0
-  - data_source_name: Active Directory
-    score: 0
-  - data_source_name: WMI
-    score: 0
-  - data_source_name: Scheduled Job
-    score: 0
-  - data_source_name: Service
-    score: 0
-  - data_source_name: Driver
-    score: 0
-  - data_source_name: Application Log
-    score: 0
-  - data_source_name: Cloud Storage
-    score: 0
-  - data_source_name: Container
-    score: 0
-  - data_source_name: Pod
-    score: 0
+  # ---- Identity: Google Workspace audit, queried ad-hoc ----
+  - { name: application-log, channel: generic, score: 1, comment: "GSuite audit accessed via console only" }

@@ -282,6 +282,16 @@ export function setAllLogSources(inv, attack, score) {
   return inv;
 }
 
+// Drop the (name, channel) entry from inv.log_sources entirely. Used by
+// the Log Inventory UI to delete custom entries that don't match any
+// known STIX log source.
+export function removeLogSource(inv, name, channel) {
+  if (!Array.isArray(inv.log_sources)) return inv;
+  const key = lsKey(name, channel);
+  inv.log_sources = inv.log_sources.filter(e => lsKey(e.name, e.channel) !== key);
+  return inv;
+}
+
 function newEntry(name) {
   return {
     data_source_name: name,

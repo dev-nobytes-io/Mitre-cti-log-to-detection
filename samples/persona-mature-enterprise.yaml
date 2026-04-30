@@ -1,135 +1,82 @@
 # Persona: Mature enterprise SOC
 # ------------------------------------------------------------------
 # A 5,000-seat enterprise that has invested in detection engineering for
-# several years. Sysmon + EDR everywhere, Zeek on egress, Splunk SIEM,
-# AD on-prem, M365 cloud, MFA via Okta. Use this to see what "good
-# detection coverage" looks like in the Coverage and Navigator views.
+# several years. Sysmon + CrowdStrike Falcon everywhere, Zeek + NetFlow
+# on egress, Splunk SIEM, on-prem AD, M365 cloud, MFA via Okta. Use this
+# to see what "good detection coverage" looks like in the Coverage and
+# Navigator views.
+#
+# Uses the ATT&CK v18+ schema: each entry is a (name, channel) tuple,
+# scored 0..5 for telemetry quality. Scores flow up the chain
+# Log Source -> Data Component -> Analytic -> Detection Strategy ->
+# Technique. An analytic only lights up when every required log source
+# is non-zero.
 # ------------------------------------------------------------------
-version: 1.2
+version: 1.3
 file_type: data-source-administration
 name: Mature enterprise SOC
 systems:
   - applicable_to: all
     description: Windows + Linux endpoints, on-prem AD, M365, Okta, AWS
 
-data_sources:
-  - data_source_name: Process
-    score: 5
-    comment: Sysmon + CrowdStrike Falcon, full process tree across the fleet
-    data_quality: { device_completeness: 5, data_field_completeness: 5, timeliness: 5, consistency: 5, retention: 4 }
-    data_source:
-      - { name: Process Creation,    score: 5, comment: "Sysmon EID 1, parent + cmdline + hash" }
-      - { name: Process Termination, score: 4, comment: "Sysmon EID 5" }
-      - { name: Process Access,      score: 4, comment: "Sysmon EID 10 with curated targets" }
-      - { name: Process Metadata,    score: 5, comment: "" }
-      - { name: OS API Execution,    score: 3, comment: "EDR-derived, partial" }
+log_sources:
+  # ---- Sysmon (deployed via GPO on every Windows host) ----
+  - { name: sysmon, channel: "1",  score: 5, comment: "Process Creation w/ parent + cmdline + hash" }
+  - { name: sysmon, channel: "3",  score: 5, comment: "Network Connection Creation" }
+  - { name: sysmon, channel: "5",  score: 4, comment: "Process Termination" }
+  - { name: sysmon, channel: "6",  score: 4, comment: "Driver Load" }
+  - { name: sysmon, channel: "7",  score: 4, comment: "Module Load (servers + tier-0)" }
+  - { name: sysmon, channel: "10", score: 4, comment: "Process Access (curated lsass watch)" }
+  - { name: sysmon, channel: "11", score: 5, comment: "File Create" }
+  - { name: sysmon, channel: "12", score: 4, comment: "Registry key create / delete / access" }
+  - { name: sysmon, channel: "13", score: 4, comment: "Registry value set" }
+  - { name: sysmon, channel: "19", score: 4, comment: "WMI Filter / Consumer / Binding" }
+  - { name: sysmon, channel: "23", score: 3, comment: "File Delete archived" }
 
-  - data_source_name: Command
-    score: 5
-    data_source:
-      - { name: Command Execution, score: 5, comment: "PowerShell ScriptBlock + cmd auditing + bash history shipping" }
+  # ---- Windows Security event channel (audit policy + AD) ----
+  - { name: windows-security, channel: "4624", score: 5, comment: "Successful logon (LogonType 2/3/10/11)" }
+  - { name: windows-security, channel: "4625", score: 5, comment: "Failed logon" }
+  - { name: windows-security, channel: "4662", score: 4, comment: "AD object access (tier-0 audited)" }
+  - { name: windows-security, channel: "4688", score: 5, comment: "Process auditing w/ command line" }
+  - { name: windows-security, channel: "4689", score: 4, comment: "Process exit" }
+  - { name: windows-security, channel: "4697", score: 4, comment: "Service installed / modified" }
+  - { name: windows-security, channel: "4698", score: 5, comment: "Scheduled task created" }
+  - { name: windows-security, channel: "4702", score: 3, comment: "Scheduled task updated" }
+  - { name: windows-security, channel: "4720", score: 5, comment: "User account created" }
+  - { name: windows-security, channel: "4726", score: 5, comment: "User account deleted" }
+  - { name: windows-security, channel: "4738", score: 5, comment: "User account changed" }
+  - { name: windows-security, channel: "4769", score: 4, comment: "Kerberos service ticket request" }
+  - { name: windows-security, channel: "5136", score: 5, comment: "Directory service object modified" }
+  - { name: windows-security, channel: "5137", score: 5, comment: "Directory service object created" }
+  - { name: windows-security, channel: "5141", score: 4, comment: "Directory service object deleted" }
 
-  - data_source_name: Script
-    score: 4
-    data_source:
-      - { name: Script Execution, score: 5, comment: "PS5+ ScriptBlock, transcript on tier-0" }
+  # ---- Windows System event channel ----
+  - { name: windows-system, channel: "7045", score: 5, comment: "Service installed" }
 
-  - data_source_name: File
-    score: 4
-    data_source:
-      - { name: File Creation,     score: 5, comment: "Sysmon EID 11" }
-      - { name: File Modification, score: 4, comment: "Targeted folders (sysvol, startup, AD)" }
-      - { name: File Deletion,     score: 3, comment: "Selective" }
-      - { name: File Metadata,     score: 4, comment: "" }
-      - { name: File Access,       score: 2, comment: "Only for crown-jewel shares" }
+  # ---- PowerShell (org-wide ScriptBlock + transcript on tier-0) ----
+  - { name: powershell, channel: "4103", score: 5, comment: "Module logging" }
+  - { name: powershell, channel: "4104", score: 5, comment: "ScriptBlock logging" }
 
-  - data_source_name: Module
-    score: 4
-    data_source:
-      - { name: Module Load, score: 4, comment: "Sysmon EID 7 across servers" }
+  # ---- Linux (auditd shipped via Auditbeat) ----
+  - { name: auditd, channel: execve,     score: 5, comment: "execve syscalls" }
+  - { name: auditd, channel: CREATE,     score: 5, comment: "File create" }
+  - { name: auditd, channel: WRITE,      score: 4, comment: "File write (selective)" }
+  - { name: auditd, channel: DELETE,     score: 3, comment: "File delete (selective)" }
+  - { name: auditd, channel: ACCESS,     score: 2, comment: "File access on crown-jewel paths only" }
+  - { name: auditd, channel: USER_LOGIN, score: 5, comment: "Linux auth events" }
 
-  - data_source_name: Driver
-    score: 3
-    data_source:
-      - { name: Driver Load,     score: 4, comment: "Sysmon EID 6" }
-      - { name: Driver Metadata, score: 2, comment: "" }
+  # ---- Network: Zeek + NetFlow on every egress ----
+  - { name: zeek,    channel: conn, score: 5, comment: "conn.log shipped to Splunk" }
+  - { name: zeek,    channel: http, score: 2, comment: "Proxy-inspected HTTP only" }
+  - { name: zeek,    channel: ssl,  score: 2, comment: "TLS metadata; no MITM" }
+  - { name: netflow, channel: v9,   score: 4, comment: "NetFlow on edge + core switches" }
 
-  - data_source_name: Service
-    score: 4
-    data_source:
-      - { name: Service Creation,     score: 5, comment: "EID 7045" }
-      - { name: Service Modification, score: 3, comment: "" }
-      - { name: Service Metadata,     score: 4, comment: "" }
-
-  - data_source_name: Windows Registry
-    score: 3
-    data_source:
-      - { name: Windows Registry Key Creation,     score: 4, comment: "Sysmon EID 12" }
-      - { name: Windows Registry Key Modification, score: 4, comment: "Sysmon EID 13/14" }
-      - { name: Windows Registry Key Deletion,     score: 3, comment: "" }
-      - { name: Windows Registry Key Access,       score: 1, comment: "Not collected at scale" }
-
-  - data_source_name: Scheduled Job
-    score: 4
-    data_source:
-      - { name: Scheduled Job Creation,     score: 5, comment: "Sec 4698 + EDR" }
-      - { name: Scheduled Job Modification, score: 3, comment: "" }
-
-  - data_source_name: WMI
-    score: 4
-    data_source:
-      - { name: WMI Creation, score: 4, comment: "" }
-
-  - data_source_name: Network Traffic
-    score: 4
-    data_source:
-      - { name: Network Connection Creation, score: 5, comment: "Zeek conn.log + Sysmon EID 3" }
-      - { name: Network Traffic Flow,        score: 4, comment: "Zeek + NetFlow on egress" }
-      - { name: Network Traffic Content,     score: 2, comment: "Only HTTP via proxy / TLS-inspected segments" }
-
-  - data_source_name: Logon Session
-    score: 5
-    data_source:
-      - { name: Logon Session Creation, score: 5, comment: "EID 4624/4625 + Okta SSO" }
-      - { name: Logon Session Metadata, score: 5, comment: "" }
-
-  - data_source_name: User Account
-    score: 5
-    data_source:
-      - { name: User Account Authentication, score: 5, comment: "Okta + AD" }
-      - { name: User Account Creation,       score: 5, comment: "EID 4720" }
-      - { name: User Account Modification,   score: 5, comment: "" }
-      - { name: User Account Deletion,       score: 5, comment: "" }
-      - { name: User Account Metadata,       score: 4, comment: "" }
-
-  - data_source_name: Active Directory
-    score: 4
-    data_source:
-      - { name: Active Directory Object Access,        score: 4, comment: "Object access auditing on tier-0" }
-      - { name: Active Directory Object Creation,      score: 5, comment: "" }
-      - { name: Active Directory Object Modification,  score: 5, comment: "" }
-      - { name: Active Directory Object Deletion,      score: 4, comment: "" }
-      - { name: Active Directory Credential Request,   score: 4, comment: "EID 4769 / 4768" }
-
-  - data_source_name: Application Log
-    score: 4
-    data_source:
-      - { name: Application Log Content, score: 4, comment: "M365 Unified Audit + custom apps via syslog" }
-
-  - data_source_name: Cloud Service
-    score: 3
-    data_source:
-      - { name: Cloud Service Enumeration, score: 3, comment: "AWS CloudTrail" }
-      - { name: Cloud Service Modification, score: 4, comment: "" }
-      - { name: Cloud Service Metadata,    score: 3, comment: "" }
-      - { name: Cloud Service Disable,     score: 3, comment: "" }
-
-  - data_source_name: Cloud Storage
-    score: 3
-    data_source:
-      - { name: Cloud Storage Access,       score: 2, comment: "S3 access logs only on sensitive buckets" }
-      - { name: Cloud Storage Creation,     score: 4, comment: "" }
-      - { name: Cloud Storage Deletion,     score: 4, comment: "" }
-      - { name: Cloud Storage Modification, score: 4, comment: "" }
-      - { name: Cloud Storage Enumeration,  score: 2, comment: "" }
-      - { name: Cloud Storage Metadata,     score: 3, comment: "" }
+  # ---- Cloud / SaaS / Identity ----
+  - { name: aws-cloudtrail,   channel: management,      score: 4, comment: "Multi-account Org Trail in S3 -> Splunk" }
+  - { name: aws-cloudtrail,   channel: data,            score: 4, comment: "S3 data events on sensitive buckets" }
+  - { name: okta,             channel: system,          score: 4, comment: "Okta system log (SSO + user mgmt)" }
+  - { name: azure-signinlogs, channel: SignInLogs,      score: 4, comment: "Azure AD sign-ins" }
+  - { name: azure-auditlogs,  channel: "Add user",      score: 5, comment: "Azure AD user create" }
+  - { name: azure-auditlogs,  channel: "Update user",   score: 5, comment: "Azure AD user update" }
+  - { name: m365,             channel: unifiedauditlog, score: 4, comment: "M365 unified audit log" }
+  - { name: application-log,  channel: generic,         score: 4, comment: "Custom apps via syslog" }
