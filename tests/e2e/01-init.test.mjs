@@ -28,6 +28,46 @@ test("offline ATT&CK auto-loads on first visit (no cache)", async () => {
   await page.context().close();
 });
 
+test("offline bundle exposes v18+ log sources, analytics, and detection strategies", async () => {
+  // Chunk 2 (additive parser): attack.js indexes the new STIX types alongside
+  // the legacy data-source / data-component pair. No consumer reads them yet.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  const counts = await page.evaluate(() => {
+    const a = window.__APP_STATE__?.attack || window.appState?.attack;
+    if (!a) return null;
+    return {
+      logSources: a.logSources?.length ?? 0,
+      analytics: a.analytics?.length ?? 0,
+      detectionStrategies: a.detectionStrategies?.length ?? 0,
+      strategyTechs: a.detectionStrategies?.reduce((n, s) => n + (s.techniqueIds?.length || 0), 0) ?? 0,
+    };
+  });
+  // Test data may not be exposed via window globals yet; fall back to fetching the bundle directly
+  // and re-parsing it via the same parser the app uses.
+  const direct = await page.evaluate(async () => {
+    const mod = await import("/js/attack.js");
+    const r = await fetch("/vendor/attack-offline.json");
+    const bundle = await r.json();
+    const a = mod.loadAttackFromBundle(bundle);
+    return {
+      logSources: a.logSources.length,
+      analytics: a.analytics.length,
+      detectionStrategies: a.detectionStrategies.length,
+      strategyTechs: a.detectionStrategies.reduce((n, s) => n + s.techniqueIds.length, 0),
+      sampleLogSource: a.logSources[0] && { id: a.logSources[0].id, name: a.logSources[0].name, channel: a.logSources[0].channel },
+      sampleAnalytic: a.analytics[0] && { id: a.analytics[0].id, name: a.analytics[0].name, logCount: a.analytics[0].logSourceIds.length },
+    };
+  });
+  assert.ok(direct.logSources > 0, `expected log sources, got ${direct.logSources}`);
+  assert.ok(direct.analytics >= 5, `expected at least 5 analytics, got ${direct.analytics}`);
+  assert.ok(direct.detectionStrategies >= 3, `expected at least 3 detection strategies, got ${direct.detectionStrategies}`);
+  assert.ok(direct.strategyTechs > 0, `expected strategy->technique relationships, got ${direct.strategyTechs}`);
+  assert.match(direct.sampleLogSource?.id || "", /^logsource--/, "log source id should be synthetic prefix");
+  assert.ok(direct.sampleAnalytic?.logCount > 0, "first analytic should reference at least one log source");
+  await page.context().close();
+});
+
 test("blocked MITRE fetch shows a warn banner and offline data still loads", async () => {
   // Real-world scenario: corporate proxy or TLS interception blocks
   // raw.githubusercontent.com. The page should not be left empty.
