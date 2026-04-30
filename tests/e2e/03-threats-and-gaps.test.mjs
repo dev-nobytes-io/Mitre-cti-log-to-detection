@@ -45,7 +45,7 @@ test("v2 coverage: importing inventory.example.yaml lights up at least one techn
   await activateTab(page, "coverage");
 
   const result = await page.evaluate(async () => {
-    const [{ computeCoverageV2 }, { effectiveLogSourceScores }, { loadOfflineBundle }] = await Promise.all([
+    const [{ computeCoverage }, { effectiveLogSourceScores }, { loadOfflineBundle }] = await Promise.all([
       import("/js/coverage.js"),
       import("/js/inventory.js"),
       import("/js/attack.js"),
@@ -55,7 +55,7 @@ test("v2 coverage: importing inventory.example.yaml lights up at least one techn
     const raw = localStorage.getItem("attack-inventory-v2");
     const inv = JSON.parse(raw);
     const lsScores = effectiveLogSourceScores(inv, attack);
-    const cov = computeCoverageV2(attack, lsScores);
+    const cov = computeCoverage(attack, lsScores);
     const lit = cov.rows.filter(r => r.weightedScore > 0);
     return {
       engine: cov.engine,

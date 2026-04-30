@@ -5,7 +5,7 @@ import {
   effectiveLogSourceScores, setLogSourceScore, setAllLogSources,
   exportYaml, importYaml, exportJson, importJson,
 } from "./inventory.js";
-import { computeCoverage, computeCoverageV2 } from "./coverage.js";
+import { computeCoverage } from "./coverage.js";
 import { buildNavigatorLayer } from "./navigator.js";
 import { conceptualDiagram, sourceDiagram, techniqueDiagram, overviewDiagram } from "./diagrams.js";
 import {
@@ -30,8 +30,7 @@ const state = {
     coverage: "",
     group: "",
     threatStatus: "",
-    legacyView: false, // chunk 3: log sources are the new primary unit; data-source view kept behind a toggle
-    analyticAggregation: "min", // chunk 4: how to aggregate log-source scores into an analytic score
+    analyticAggregation: "min", // how to aggregate log-source scores into an analytic score (V2 chain)
   },
   expanded: new Set(),
   graph: {
@@ -207,7 +206,6 @@ function populateTacticFilter() {
 $("#dsFilter").addEventListener("input", e => { state.filters.ds = e.target.value.toLowerCase(); renderInventory(); });
 $("#platformFilter").addEventListener("change", e => { state.filters.platform = e.target.value; renderInventory(); });
 $("#onlyScored")?.addEventListener("change", e => { state.filters.onlyScored = e.target.checked; renderInventory(); });
-$("#legacyView")?.addEventListener("change", e => { state.filters.legacyView = e.target.checked; renderInventory(); });
 $("#componentFilter")?.addEventListener("input", e => { state.filters.component = e.target.value.toLowerCase(); renderComponents(); });
 $("#componentScoreFilter")?.addEventListener("change", e => { state.filters.componentScore = e.target.value; renderComponents(); });
 $("#setAllBtn").addEventListener("click", () => {
@@ -313,9 +311,6 @@ function renderInventory() {
     `;
   }
 
-  if (state.filters.legacyView) {
-    return renderLegacyDataSourceInventory(root, compScores);
-  }
   return renderLogSourceInventory(root, compScores, lsScores);
 }
 
@@ -407,86 +402,6 @@ function renderLogSourceInventory(root, compScores, lsScores) {
   });
 }
 
-// v1 legacy view: score data sources / components directly. Kept behind
-// the "Show legacy data-source view" toggle so users with old DeTT&CT
-// inventories can still drive the same scoring path.
-function renderLegacyDataSourceInventory(root, compScores) {
-  const filterText = state.filters.ds;
-  const filterPlatform = state.filters.platform;
-  const onlyScored = !!state.filters.onlyScored;
-
-  const sources = state.attack.dataSources.filter(ds => {
-    if (filterText && !(ds.name.toLowerCase().includes(filterText) || ds.attackId?.toLowerCase().includes(filterText))) return false;
-    if (filterPlatform && !ds.platforms.includes(filterPlatform)) return false;
-    if (onlyScored && getSourceScore(ds) === 0 && !ds.components.some(c => (compScores.get(c.id)?.score || 0) > 0)) return false;
-    return true;
-  });
-
-  let html = `<div class="ds-row header">
-    <div></div><div>Data source</div><div>Components</div><div>Score</div>
-  </div>`;
-
-  for (const ds of sources) {
-    const expanded = state.expanded.has(ds.id);
-    const score = getSourceScore(ds);
-    const compCount = ds.components.length;
-    const coveredComp = ds.components.filter(c => (compScores.get(c.id)?.score || 0) > 0).length;
-    html += `
-      <div class="ds-row" data-ds-id="${escapeAttr(ds.id)}">
-        <div class="toggle" data-toggle="${escapeAttr(ds.id)}">${expanded ? "▾" : "▸"}</div>
-        <div>
-          <div class="ds-name">${escapeHtml(ds.name)} <span style="color:var(--muted);font-weight:400">${escapeHtml(ds.attackId || "")}</span></div>
-          <div class="ds-meta">${escapeHtml(ds.platforms.join(", ") || "—")} · ${coveredComp}/${compCount} components scored</div>
-        </div>
-        <div class="ds-meta">${compCount} component${compCount === 1 ? "" : "s"}</div>
-        <div>${scoreSelect(score, "ds", ds.name)}</div>
-      </div>
-      <div class="ds-components ${expanded ? "open" : ""}" data-components-for="${escapeAttr(ds.id)}">
-        ${ds.components.map(dc => {
-          const eff = compScores.get(dc.id);
-          const dcScore = eff?.score ?? score;
-          const techCount = dc.techniqueIds.length;
-          return `<div class="dc-row">
-            <div>
-              <div class="dc-name">${escapeHtml(dc.name)}</div>
-              <div class="dc-meta">${techCount} technique${techCount === 1 ? "" : "s"} detected</div>
-            </div>
-            <div class="dc-meta">${eff?.hasOverride ? "(override)" : "(inherits)"}</div>
-            <div>${scoreSelect(dcScore, "dc", `${ds.name}|${dc.name}`)}</div>
-          </div>`;
-        }).join("") || `<div class="dc-meta">No components defined.</div>`}
-      </div>
-    `;
-  }
-
-  root.innerHTML = html;
-
-  root.querySelectorAll("[data-toggle]").forEach(el => {
-    el.addEventListener("click", () => {
-      const id = el.getAttribute("data-toggle");
-      if (state.expanded.has(id)) state.expanded.delete(id);
-      else state.expanded.add(id);
-      renderInventory();
-    });
-  });
-
-  root.querySelectorAll("select[data-kind]").forEach(sel => {
-    sel.addEventListener("change", () => {
-      const kind = sel.dataset.kind;
-      const key = sel.dataset.key;
-      const value = Number(sel.value);
-      if (kind === "ds") {
-        setSourceScore(state.inventory, key, value, { cascade: true });
-      } else {
-        const [src, comp] = key.split("|");
-        setComponentScore(state.inventory, src, comp, value);
-      }
-      saveInventory(state.inventory);
-      refreshAll();
-    });
-  });
-}
-
 // --- Data Components tab ---
 function renderComponents() {
   const root = $("#componentTable");
@@ -562,22 +477,16 @@ function getSourceScore(ds) {
   return entry ? Number(entry.score) || 0 : 0;
 }
 
-// Run the active coverage engine. V2 wins whenever the loaded ATT&CK
-// bundle exposes detection strategies (modern v18+ data); otherwise we
-// fall back to the legacy data-component chain so older bundles or
-// custom STIX uploads keep working.
+// Coverage engine walks Log Source -> Analytic -> Detection Strategy ->
+// Technique. Bundles without detection strategies (older STIX dumps or
+// custom uploads) produce zero-coverage rows but the call still returns a
+// stable shape so the UI doesn't break.
 function runCoverage() {
   if (!state.attack) return null;
-  if ((state.attack.detectionStrategies?.length || 0) > 0) {
-    return computeCoverageV2(
-      state.attack,
-      effectiveLogSourceScores(state.inventory, state.attack),
-      { analyticAggregation: state.filters.analyticAggregation || "min" },
-    );
-  }
   return computeCoverage(
     state.attack,
-    effectiveComponentScores(state.inventory, state.attack),
+    effectiveLogSourceScores(state.inventory, state.attack),
+    { analyticAggregation: state.filters.analyticAggregation || "min" },
   );
 }
 
