@@ -250,6 +250,73 @@ test("Detection Strategies cards expand into per-analytic and per-log-source det
   await page.context().close();
 });
 
+test("Run sample assessment + persistent help launcher + guided tour (chunk 16)", async () => {
+  // chunk 16: three new on-boarding helpers on the Setup tab.
+  //   1. "Run sample assessment" loads the sample inventory + threats
+  //      and jumps to the Coverage tab. After click: gaps tab is
+  //      active and stat cards are populated.
+  //   2. The persistent "?" help launcher (always visible) opens the
+  //      active tab's <details class="tab-help"> block.
+  //   3. The guided tour overlay walks five steps; clicking through
+  //      auto-switches tabs.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+
+  // bootApp auto-switches from Setup to Inventory after offline-bundle
+  // load. Re-activate Setup so the hero CTA is visible & clickable.
+  await activateTab(page, "setup");
+  // (1) Sample assessment.
+  const heroVisible = await page.evaluate(() => !!document.querySelector("#runSampleAssessment"));
+  assert.ok(heroVisible, "Setup tab should expose #runSampleAssessment");
+  await page.click("#runSampleAssessment");
+  await page.waitForFunction(() => /Sample assessment loaded/.test(document.querySelector("#statusText")?.textContent || ""));
+  // Coverage tab must now be active and populated.
+  const coverageActive = await page.evaluate(() => document.querySelector("#tab-gaps")?.classList.contains("active"));
+  assert.ok(coverageActive, "after sample assessment the Coverage tab should be active");
+  const totalThreats = await page.evaluate(() => {
+    const card = Array.from(document.querySelectorAll("#threatStats .stat-card")).find(c => c.querySelector(".label")?.textContent?.includes("Threat techniques"));
+    return Number(card?.querySelector(".value")?.textContent || "0");
+  });
+  assert.ok(totalThreats > 0, `expected populated threat-techniques count, got ${totalThreats}`);
+
+  // (2) Help launcher opens the active tab's tab-help details.
+  await page.click("#helpLauncher");
+  await page.waitForTimeout(150);
+  const helpOpen = await page.evaluate(() => document.querySelector(".panel.active .tab-help")?.hasAttribute("open"));
+  assert.equal(helpOpen, true, "help launcher should open the active tab's <details class='tab-help'>");
+
+  // (3) Tour: jump back to setup, start tour, walk one step.
+  await activateTab(page, "setup");
+  await page.click("#startTutorial");
+  await page.waitForTimeout(150);
+  let tourState = await page.evaluate(() => ({
+    overlayShown: !document.querySelector("#tutorialOverlay")?.hidden,
+    title: document.querySelector("#tutorialTitle")?.textContent || "",
+    stepNum: document.querySelector("#tutorialStepNum")?.textContent || "",
+  }));
+  assert.equal(tourState.overlayShown, true, "tutorial overlay should be visible after Start tour");
+  assert.match(tourState.title, /Load ATT/, `step 1 title, got: ${tourState.title}`);
+  assert.equal(tourState.stepNum, "1");
+
+  await page.click("#tutorialNext");
+  await page.waitForTimeout(150);
+  tourState = await page.evaluate(() => ({
+    title: document.querySelector("#tutorialTitle")?.textContent || "",
+    stepNum: document.querySelector("#tutorialStepNum")?.textContent || "",
+    inventoryActive: document.querySelector("#tab-inventory")?.classList.contains("active"),
+  }));
+  assert.equal(tourState.stepNum, "2");
+  assert.match(tourState.title, /Score your log inventory/);
+  assert.equal(tourState.inventoryActive, true, "step 2 should switch to the Log Inventory tab");
+
+  await page.click("#tutorialSkip");
+  await page.waitForTimeout(150);
+  const overlayHidden = await page.evaluate(() => document.querySelector("#tutorialOverlay")?.hidden);
+  assert.equal(overlayHidden, true, "Skip should hide the overlay");
+
+  await page.context().close();
+});
+
 test("desktop layout still works (no mobile dropdown shown)", async () => {
   const page = await newPage({ viewport: { width: 1280, height: 900 }, blockExternal: true });
   await bootApp(page);

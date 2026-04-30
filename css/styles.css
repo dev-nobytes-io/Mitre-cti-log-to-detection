@@ -294,6 +294,97 @@ button.danger { color: var(--bad); border-color: var(--bad); }
 .mermaid-host svg { max-width: 100%; height: auto; transition: opacity 220ms ease; }
 .mermaid-host.rendering { opacity: 0.45; transform: scale(0.995); }
 
+/* chunk 16: hero CTA buttons on the Setup tab */
+.hero-cta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 14px 0;
+  padding: 14px;
+  background: linear-gradient(135deg, rgba(47, 129, 247, 0.08), rgba(47, 129, 247, 0.02));
+  border: 1px solid rgba(47, 129, 247, 0.3);
+  border-radius: 6px;
+}
+.big-cta {
+  font-size: 14px;
+  padding: 10px 16px;
+  font-weight: 600;
+}
+.big-cta-secondary {
+  font-size: 14px;
+  padding: 10px 16px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.big-cta-secondary:hover { border-color: #2f81f7; color: #2f81f7; }
+
+/* chunk 16: persistent floating help launcher */
+.help-launcher {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #2f81f7;
+  color: #fff;
+  border: none;
+  font-size: 22px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+  z-index: 50;
+  transition: transform 150ms ease, background 150ms ease;
+}
+.help-launcher:hover { background: #79b8ff; transform: scale(1.08); }
+.help-launcher.pulse {
+  animation: help-pulse 2s ease-in-out 2;
+}
+@keyframes help-pulse {
+  0%, 100% { box-shadow: 0 4px 14px rgba(0,0,0,0.4), 0 0 0 0 rgba(47,129,247,0.6); }
+  50%      { box-shadow: 0 4px 14px rgba(0,0,0,0.4), 0 0 0 12px rgba(47,129,247,0); }
+}
+
+/* chunk 16: guided tutorial overlay. The `display: flex` would
+   override the [hidden] attribute and leave an invisible overlay
+   covering the whole viewport, blocking clicks. The explicit
+   `[hidden]` rule restores the expected behaviour. */
+.tutorial-overlay[hidden] { display: none !important; }
+.tutorial-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: tutorial-fade 200ms ease;
+}
+@keyframes tutorial-fade { from { opacity: 0; } to { opacity: 1; } }
+.tutorial-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px 24px;
+  max-width: 520px;
+  box-shadow: 0 12px 48px rgba(0,0,0,0.6);
+  animation: tutorial-slide 220ms ease;
+}
+@keyframes tutorial-slide { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.tutorial-step-label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+.tutorial-card h3 { margin: 4px 0 8px; color: var(--text); font-size: 18px; }
+.tutorial-card p { color: var(--text); line-height: 1.6; font-size: 14px; }
+.tutorial-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+.tutorial-actions button { padding: 6px 14px; }
+
+@media (max-width: 760px) {
+  .help-launcher { right: 12px; bottom: 12px; width: 40px; height: 40px; font-size: 20px; }
+  .hero-cta { flex-direction: column; }
+  .big-cta, .big-cta-secondary { width: 100%; }
+}
+
 /* chunk 14: strategy-card expansion + per-channel toggles */
 .strategy-card.parked { opacity: 0.6; }
 .strat-expansion .strat-an-block {

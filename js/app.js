@@ -1598,3 +1598,99 @@ function pct(n) { return `${Math.round((n || 0) * 100)}%`; }
   }
   refreshAll();
 })();
+
+// chunk 16: end-to-end "Run sample assessment" button.
+// Loads the example log inventory + a sample threat group set in one
+// click, then jumps to the Coverage tab so the user immediately sees
+// what an end-to-end run looks like.
+$("#runSampleAssessment")?.addEventListener("click", async () => {
+  setStatus("Loading sample inventory + threats…", "busy");
+  try {
+    if (!state.attack) {
+      try { state.attack = await loadOfflineBundle(); onAttackLoaded("offline-bundle"); }
+      catch (_) { setStatus("Sample assessment needs ATT&CK data — load it on tab 1.", "error"); return; }
+    }
+    const [invText, threatsText] = await Promise.all([
+      fetch("samples/inventory.example.yaml").then(r => r.text()),
+      fetch("samples/threats.example.yaml").then(r => r.text()),
+    ]);
+    state.inventory = importYaml(invText);
+    saveInventory(state.inventory);
+    state.threats = importThreatsYaml(threatsText);
+    saveThreats(state.threats);
+    refreshAll();
+    activateTab("gaps");
+    setStatus("Sample assessment loaded — see the Coverage tab.", "ok");
+    setBanner(`<strong>Sample assessment loaded.</strong> The example inventory (sysmon, powershell, windows-security, zeek, …) is scored, the example threat groups are picked. The Coverage tab now shows what those groups can / can't be detected with this telemetry.`, "ok");
+  } catch (e) {
+    console.error("Sample assessment failed", e);
+    setStatus(`Sample assessment failed: ${e.message}`, "error");
+  }
+});
+
+// chunk 16: persistent help launcher. Opens the active tab's
+// `<details class="tab-help">` block and scrolls it into view so the
+// SOPs are always one click away.
+$("#helpLauncher")?.addEventListener("click", () => {
+  const activePanel = document.querySelector(".panel.active");
+  const help = activePanel?.querySelector(".tab-help");
+  if (!help) return;
+  help.open = true;
+  help.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+// Pulse the help launcher briefly on first visit so users notice it.
+try {
+  if (!localStorage.getItem("help-launcher-seen")) {
+    setTimeout(() => {
+      $("#helpLauncher")?.classList.add("pulse");
+      localStorage.setItem("help-launcher-seen", "1");
+    }, 1200);
+  }
+} catch (_) { /* localStorage blocked, no-op */ }
+
+// chunk 16: minimal guided tour. Five overlay steps walk the user
+// through the workflow: Setup -> Inventory -> Detection Strategies ->
+// Threats -> Coverage. Click Next to advance + auto-switch tabs.
+const TUTORIAL_STEPS = [
+  { tab: "setup",     title: "1. Load ATT&CK data",
+    body: "Tab 1 fetches the latest MITRE ATT&CK STIX bundle (or falls back to the bundled offline copy). It's already loaded — you're ready to score." },
+  { tab: "inventory", title: "2. Score your log inventory",
+    body: "Tab 2 is where you tell the app what telemetry you collect. Each row is a (name, channel) tuple like sysmon/1 or windows-security/4624. Set 0–5; the score flows up to data components, analytics, detection strategies, and finally techniques. The example inventory was just loaded for the demo." },
+  { tab: "coverage",  title: "3. See your detection strategies light up",
+    body: "Tab 4 (Detection Strategies) shows every x-mitre-detection-strategy with a lit/unlit badge. Lit means at least one analytic is fully covered by your log scores. Click a chevron to drill into the analytics + log sources required." },
+  { tab: "threats",   title: "4. Pick the threats you care about",
+    body: "Tab 5 lists MITRE ATT&CK threat-actor groups (APT29, FIN7, …). Tick the ones that matter to your org — the Coverage tab will cross-reference what those groups do against what you can catch." },
+  { tab: "gaps",      title: "5. Read the gap analysis",
+    body: "Tab 6 cross-references your inventory against the picked threats. Gaps are techniques you can detect in principle but don't. Risk-accepted techniques (✓ on tab 4) are acknowledged gaps in their own bucket. Export the Navigator layer for a heatmap." },
+];
+let tutorialStep = 0;
+$("#startTutorial")?.addEventListener("click", () => {
+  tutorialStep = 0;
+  showTutorialStep();
+});
+$("#tutorialNext")?.addEventListener("click", () => {
+  tutorialStep += 1;
+  if (tutorialStep >= TUTORIAL_STEPS.length) hideTutorial();
+  else showTutorialStep();
+});
+$("#tutorialPrev")?.addEventListener("click", () => {
+  if (tutorialStep > 0) tutorialStep -= 1;
+  showTutorialStep();
+});
+$("#tutorialSkip")?.addEventListener("click", hideTutorial);
+function showTutorialStep() {
+  const step = TUTORIAL_STEPS[tutorialStep];
+  if (!step) return hideTutorial();
+  if (step.tab) activateTab(step.tab);
+  $("#tutorialOverlay").hidden = false;
+  $("#tutorialStepNum").textContent = String(tutorialStep + 1);
+  $("#tutorialStepTotal").textContent = String(TUTORIAL_STEPS.length);
+  $("#tutorialTitle").textContent = step.title;
+  $("#tutorialBody").textContent = step.body;
+  $("#tutorialPrev").disabled = tutorialStep === 0;
+  $("#tutorialNext").textContent = tutorialStep === TUTORIAL_STEPS.length - 1 ? "Finish" : "Next →";
+}
+function hideTutorial() {
+  $("#tutorialOverlay").hidden = true;
+}
