@@ -8,15 +8,20 @@ after(async () => { await closeBrowser(); });
 // the bundled offline ATT&CK (38 data sources, 109 components). These
 // numbers are measured, not aspirational — if the matching logic regresses
 // they'll go to 0 and the test will fail loudly.
+// Each row is the expected outcome of importing that fixture against the
+// bundled offline ATT&CK. The legacy v1.2 personas still ship a
+// `data_sources:` block, so they exercise the import-side back-compat
+// path; inventory.example.yaml is a pure v2 file and has its own row in
+// the v2-specific test below.
 const PERSONAS = [
-  { file: "persona-mature-enterprise.yaml", minScored: 17, minComponents: 50 },
-  { file: "persona-cloud-saas.yaml",        minScored: 11, minComponents: 40 },
-  { file: "persona-network-mssp.yaml",      minScored: 6,  minComponents: 15 },
-  { file: "persona-greenfield-startup.yaml",minScored: 6,  minComponents: 15 },
-  { file: "inventory.example.yaml",         minScored: 5,  minComponents: 11 },
+  { file: "persona-mature-enterprise.yaml", minScored: 17, minComponents: 50, kind: "v1" },
+  { file: "persona-cloud-saas.yaml",        minScored: 11, minComponents: 40, kind: "v1" },
+  { file: "persona-network-mssp.yaml",      minScored: 6,  minComponents: 15, kind: "v1" },
+  { file: "persona-greenfield-startup.yaml",minScored: 6,  minComponents: 15, kind: "v1" },
+  { file: "inventory.example.yaml",         minScored: 15, minComponents: 11, kind: "v2" },
 ];
 
-for (const { file, minScored, minComponents } of PERSONAS) {
+for (const { file, minScored, minComponents, kind } of PERSONAS) {
   test(`importing ${file} populates the inventory UI`, async () => {
     const page = await newPage({ blockExternal: true });
     await bootApp(page);
@@ -28,12 +33,14 @@ for (const { file, minScored, minComponents } of PERSONAS) {
     const status = await page.locator("#statusText").innerText();
     assert.match(status, /Imported/, `status should report import success, got: ${status}`);
 
-    // Inventory summary must show non-zero scored sources.
+    // v1 fixtures should report scores via the legacy "data sources scored"
+    // pill (back-compat path); v2 fixtures via "log sources scored".
     const summary = await readInventorySummary(page);
-    const scored = summary["data sources scored"];
-    assert.ok(scored, `inventory summary missing 'data sources scored', got: ${JSON.stringify(summary)}`);
+    const pillKey = kind === "v2" ? "log sources scored" : "data sources scored";
+    const scored = summary[pillKey];
+    assert.ok(scored, `inventory summary missing '${pillKey}', got: ${JSON.stringify(summary)}`);
     const [scoredN, totalN] = scored.split("/").map(s => Number(s.trim()));
-    assert.ok(scoredN >= minScored, `expected >= ${minScored} scored sources for ${file}, got ${scoredN}/${totalN}`);
+    assert.ok(scoredN >= minScored, `expected >= ${minScored} '${pillKey}' for ${file}, got ${scoredN}/${totalN}`);
 
     // Real DOM rows: at least minScored rows have a non-zero score select.
     const rowCount = await countScoredInventoryRows(page);
@@ -49,12 +56,11 @@ for (const { file, minScored, minComponents } of PERSONAS) {
 }
 
 test("v2: importing inventory.example.yaml exposes scored log_sources block", async () => {
-  // chunk 3: the inventory schema gained a log_sources[] block. The example
-  // file ships explicit (sysmon/1, powershell/4104, etc.) entries with
-  // non-zero scores. Assert that:
+  // chunk 3 introduced log_sources[]; chunk 6 made it the only inventory
+  // path. The example file ships explicit (sysmon/1, powershell/4104,
+  // etc.) entries with non-zero scores. Assert that:
   //   - the inventory summary surfaces a non-zero "log sources scored" pill
-  //   - the v2 default view renders >0 scored log-source selects
-  //   - flipping into legacy view still works (toggle wired up)
+  //   - the inventory view renders >0 scored log-source selects
   const page = await newPage({ blockExternal: true });
   await bootApp(page);
   await activateTab(page, "inventory");
@@ -73,13 +79,7 @@ test("v2: importing inventory.example.yaml exposes scored log_sources block", as
   await page.waitForTimeout(150);
 
   const lsRows = await countScoredLogSourceRows(page);
-  assert.ok(lsRows >= 5, `expected >=5 scored log-source selects in v2 view, got ${lsRows}`);
-
-  // Toggle legacy view — selects should switch to data-kind='ds'.
-  await page.click("#legacyView");
-  await page.waitForTimeout(150);
-  const dsKindCount = await page.evaluate(() => document.querySelectorAll("#inventoryTable select[data-kind='ds']").length);
-  assert.ok(dsKindCount > 0, `legacy view should render data-source selects, got ${dsKindCount}`);
+  assert.ok(lsRows >= 5, `expected >=5 scored log-source selects, got ${lsRows}`);
 
   await page.context().close();
 });

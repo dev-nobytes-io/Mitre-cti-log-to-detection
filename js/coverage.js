@@ -1,87 +1,26 @@
-// Compute detection coverage for techniques.
+// Compute detection coverage for techniques along the ATT&CK v18+ chain:
 //
-// Two engines coexist for one chunk:
-//   - computeCoverage()    — legacy v1 chain: data component -> technique
-//                            (via the old `detects` relationship). Only used
-//                            when the loaded ATT&CK bundle has no
-//                            x-mitre-detection-strategy objects.
-//   - computeCoverageV2()  — v18+ chain: log source -> analytic -> detection
-//                            strategy -> technique. Preferred whenever the
-//                            bundle exposes detection strategies.
-//
-// Both engines emit the same row shape (legacy fields are aliased on V2 rows
-// so navigator.js, the threats/gaps tab, and existing tests keep working
-// without changes).
-
-export function computeCoverage(attack, componentScores) {
-  // componentScores: Map(componentId -> { score, ... })
-  const techniqueRows = attack.techniques.map(tech => {
-    const compIds = tech.componentIds;
-    const total = compIds.length;
-    let coveredCount = 0;
-    let maxScore = 0;
-    const coveringComponents = [];
-    for (const cid of compIds) {
-      const entry = componentScores.get(cid);
-      if (entry && entry.score > 0) {
-        coveredCount += 1;
-        if (entry.score > maxScore) maxScore = entry.score;
-        coveringComponents.push({ componentId: cid, ...entry });
-      }
-    }
-    const ratio = total === 0 ? 0 : coveredCount / total;
-    const weighted = maxScore * ratio;
-    return {
-      attackId: tech.attackId,
-      stixId: tech.id,
-      name: tech.name,
-      tactics: tech.tactics,
-      isSubtechnique: tech.isSubtechnique,
-      platforms: tech.platforms,
-      totalDetectingComponents: total,
-      coveredComponents: coveredCount,
-      ratio,
-      maxScore,
-      weightedScore: weighted,
-      coveringComponents,
-      hasDetections: total > 0,
-    };
-  });
-
-  const detectable = techniqueRows.filter(r => r.hasDetections);
-  const covered = detectable.filter(r => r.coveredComponents > 0);
-  const fully = detectable.filter(r => r.ratio >= 1);
-  const partial = detectable.filter(r => r.ratio > 0 && r.ratio < 1);
-
-  return {
-    rows: techniqueRows,
-    summary: {
-      total: techniqueRows.length,
-      detectable: detectable.length,
-      covered: covered.length,
-      fully: fully.length,
-      partial: partial.length,
-      avgScore: covered.length ? covered.reduce((s, r) => s + r.weightedScore, 0) / covered.length : 0,
-    },
-  };
-}
-
-// V2: compute coverage along the v18+ chain.
+//   Log Source ─▶ Analytic ─▶ Detection Strategy ─▶ Technique
 //
 // For each technique:
-//   - Find every detection strategy that detects it (techniques.strategyIds).
+//   - Find every detection strategy that detects it (technique.strategyIds).
 //   - For each strategy, score every analytic it references; an analytic is
 //     "lit" iff every required log source has score > 0. Analytic score is
-//     the aggregator over those scores (default `min`; user can pick `avg`).
+//     the aggregator over those scores (default `min`; UI lets the user
+//     pick `avg`).
 //   - A strategy is "lit" iff at least one of its analytics is lit. Strategy
 //     score = max of its lit analytic scores.
-//   - Technique score = max strategy score among lit strategies. Coverage
-//     ratio = lit strategies / total strategies.
+//   - Technique weightedScore = max strategy score among lit strategies.
+//     Coverage ratio = lit strategies / total strategies.
 //
 // Score aggregation default = `min` (chain-is-only-as-strong-as-the-weakest-
-// log) is semantically correct but punishing; the UI exposes a toggle for
-// `avg` for users who'd rather grade leniently.
-export function computeCoverageV2(attack, logSourceScores, { analyticAggregation = "min" } = {}) {
+// log) is semantically correct but punishing; the UI exposes an `avg` toggle
+// for users who prefer to grade leniently.
+//
+// Each row exposes V2-native fields plus legacy aliases
+// (totalDetectingComponents, coveredComponents, coveringComponents,
+// maxScore) so navigator.js, threats.js, and existing UI keep working.
+export function computeCoverage(attack, logSourceScores, { analyticAggregation = "min" } = {}) {
   const aggregate = analyticAggregation === "avg"
     ? (vals) => vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0
     : (vals) => vals.length ? Math.min(...vals) : 0;
