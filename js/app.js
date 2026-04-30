@@ -3,7 +3,7 @@ import {
   loadInventory, saveInventory, resetInventory,
   effectiveComponentScores, setSourceScore, setComponentScore, setAllSources,
   effectiveLogSourceScores, setLogSourceScore, setAllLogSources, removeLogSource,
-  setLogSourceEnabled,
+  setLogSourceEnabled, setLogSourceComponentRefs,
   setRiskAccepted, isRiskAccepted, logSourceRiskKey,
   exportYaml, importYaml, exportJson, importJson,
 } from "./inventory.js";
@@ -34,7 +34,13 @@ const state = {
     threatStatus: "",
     analyticAggregation: "min", // how to aggregate log-source scores into an analytic score (V2 chain)
     inventoryGrouping: "name", // chunk 9: 'name' (group by log-source name) or 'component' (legacy by-data-component view)
+    customLsCompFilter: "", // chunk 13: filter for the component picker on the manual-entry form
   },
+  // chunk 13: which data components the user has selected for the
+  // custom log source they're about to add. Persists across opens of
+  // the form until Add fires (then it clears). Stored as a Set of
+  // STIX component ids.
+  customLsComponentRefs: new Set(),
   expanded: new Set(),
   graph: {
     sourceId: "",
@@ -173,6 +179,7 @@ function onAttackLoaded(source) {
   populatePlatformFilter();
   populateTacticFilter();
   populateGroupSelectors();
+  renderCustomLsComponentPicker(); // chunk 13: needs attack data
   refreshAll();
   // Auto-show inventory tab once data is loaded
   if ($(".tab.active").dataset.tab === "setup") {
@@ -234,15 +241,70 @@ $("#customLsAdd")?.addEventListener("click", () => {
     setStatus("Provide a name or channel", "error");
     return;
   }
-  setLogSourceScore(state.inventory, name, channel, score, { comment });
+  // chunk 13: also save the picked component_refs so the custom tuple
+  // drives coverage on the components the user mapped it to.
+  const componentRefs = Array.from(state.customLsComponentRefs);
+  setLogSourceScore(state.inventory, name, channel, score, { comment, componentRefs });
   saveInventory(state.inventory);
   // Reset form, leave the panel open so users can add several quickly.
   if ($("#customLsName")) $("#customLsName").value = "";
   if ($("#customLsChannel")) $("#customLsChannel").value = "";
   if ($("#customLsComment")) $("#customLsComment").value = "";
-  setStatus(`Added log source ${name}/${channel} (score ${score})`, "ok");
+  state.customLsComponentRefs.clear();
+  renderCustomLsComponentPicker();
+  const mapped = componentRefs.length > 0 ? ` (mapped to ${componentRefs.length} component${componentRefs.length === 1 ? "" : "s"})` : "";
+  setStatus(`Added log source ${name}/${channel} (score ${score})${mapped}`, "ok");
   refreshAll();
 });
+
+// chunk 13: filter input + picker render for the manual-entry form's
+// component map.
+$("#customLsCompFilter")?.addEventListener("input", e => {
+  state.filters.customLsCompFilter = e.target.value.toLowerCase();
+  renderCustomLsComponentPicker();
+});
+
+function renderCustomLsComponentPicker() {
+  const root = $("#customLsCompPicker");
+  const countEl = $("#customLsCompCount");
+  if (!root) return;
+  if (!state.attack) {
+    root.innerHTML = `<div class="comp-meta" style="padding:6px">Load ATT&CK data first.</div>`;
+    if (countEl) countEl.textContent = "0 selected";
+    return;
+  }
+  const filter = state.filters.customLsCompFilter || "";
+  const all = state.attack.dataComponents.slice().sort((a, b) => {
+    const sa = state.attack.dataSourceById.get(a.sourceId)?.name || "";
+    const sb = state.attack.dataSourceById.get(b.sourceId)?.name || "";
+    return sa.localeCompare(sb) || a.name.localeCompare(b.name);
+  });
+  const visible = all.filter(c => {
+    if (!filter) return true;
+    const sn = state.attack.dataSourceById.get(c.sourceId)?.name || "";
+    return (c.name + " " + sn).toLowerCase().includes(filter);
+  });
+  if (countEl) countEl.textContent = `${state.customLsComponentRefs.size} selected`;
+  let html = "";
+  for (const c of visible) {
+    const checked = state.customLsComponentRefs.has(c.id) ? "checked" : "";
+    const sn = state.attack.dataSourceById.get(c.sourceId)?.name || "?";
+    html += `<label class="component-pick">
+      <input type="checkbox" data-comp-pick="${escapeAttr(c.id)}" ${checked} />
+      <span>${escapeHtml(c.name)} <span style="color:var(--muted);font-size:11px">/ ${escapeHtml(sn)}</span></span>
+    </label>`;
+  }
+  if (visible.length === 0) html = `<div class="comp-meta" style="padding:6px">No components match "${escapeHtml(filter)}".</div>`;
+  root.innerHTML = html;
+  root.querySelectorAll("input[data-comp-pick]").forEach(box => {
+    box.addEventListener("change", () => {
+      const id = box.getAttribute("data-comp-pick");
+      if (box.checked) state.customLsComponentRefs.add(id);
+      else state.customLsComponentRefs.delete(id);
+      if (countEl) countEl.textContent = `${state.customLsComponentRefs.size} selected`;
+    });
+  });
+}
 $("#componentFilter")?.addEventListener("input", e => { state.filters.component = e.target.value.toLowerCase(); renderComponents(); });
 $("#componentScoreFilter")?.addEventListener("change", e => { state.filters.componentScore = e.target.value; renderComponents(); });
 $("#setAllBtn").addEventListener("click", () => {

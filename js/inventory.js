@@ -158,6 +158,17 @@ export function effectiveComponentScores(inv, attack) {
           v2Score = Math.max(v2Score, clampScore(lsEntry.score));
         }
       }
+      // chunk 13: also project from custom user-added log sources that
+      // explicitly map to this component via `component_refs`. Lets a
+      // tuple the bundle doesn't know about (e.g. winlogbeat/9999)
+      // still drive coverage on the components it feeds.
+      for (const e of inv.log_sources || []) {
+        if (!Array.isArray(e.component_refs) || !e.component_refs.includes(dc.id)) continue;
+        if (e.enabled === false) continue;
+        if (e.score === undefined || e.score === null) continue;
+        v2Any = true;
+        v2Score = Math.max(v2Score, clampScore(e.score));
+      }
 
       const score = Math.max(v1Score, v2Score);
       if (!entry && !v2Any && !hasV1Override) continue;
@@ -276,6 +287,10 @@ export function setAllSources(inv, attack, score) {
 }
 
 // v2: set the score for a single log source (name, channel) tuple.
+// Optional opts.componentRefs (array of STIX data-component ids) lets the
+// caller record which data components a custom tuple feeds — chunk 13
+// uses this so manual entries can drive coverage even when the (name,
+// channel) doesn't match a known bundle log source.
 export function setLogSourceScore(inv, name, channel, score, opts = {}) {
   if (!Array.isArray(inv.log_sources)) inv.log_sources = [];
   const key = lsKey(name, channel);
@@ -289,6 +304,7 @@ export function setLogSourceScore(inv, name, channel, score, opts = {}) {
       score: clampScore(score),
       enabled: true,
       comment: opts.comment || "",
+      component_refs: Array.isArray(opts.componentRefs) ? [...opts.componentRefs] : [],
     };
     inv.log_sources.push(entry);
   } else {
@@ -296,7 +312,20 @@ export function setLogSourceScore(inv, name, channel, score, opts = {}) {
     if (opts.comment !== undefined) entry.comment = opts.comment;
     if (entry.enabled === undefined) entry.enabled = true;
     if (!entry.date_connected) entry.date_connected = today();
+    if (Array.isArray(opts.componentRefs)) entry.component_refs = [...opts.componentRefs];
   }
+  return inv;
+}
+
+// chunk 13: replace the component_refs[] for an existing log source
+// without touching its score / comment / enabled flag. Used by the
+// inventory tab's "Edit components" dialog on custom rows.
+export function setLogSourceComponentRefs(inv, name, channel, componentIds) {
+  if (!Array.isArray(inv.log_sources)) inv.log_sources = [];
+  const key = lsKey(name, channel);
+  const entry = inv.log_sources.find(e => lsKey(e.name, e.channel) === key);
+  if (!entry) return inv;
+  entry.component_refs = Array.isArray(componentIds) ? [...componentIds] : [];
   return inv;
 }
 
@@ -401,6 +430,7 @@ export function exportYaml(inv) {
       score: clampScore(e.score),
       enabled: e.enabled !== false,
       comment: e.comment || "",
+      component_refs: Array.isArray(e.component_refs) ? [...e.component_refs] : [],
     })),
     risk_accepted: inv.risk_accepted || { log_sources: {}, components: {}, techniques: {}, groups: {} },
   };
@@ -449,6 +479,7 @@ function importDoc(doc) {
       score: clampScore(e.score),
       enabled: e.enabled !== false,
       comment: e.comment || "",
+      component_refs: Array.isArray(e.component_refs) ? e.component_refs.filter(x => typeof x === "string") : [],
     })).filter(e => e.name || e.channel);
   }
   if (doc.risk_accepted && typeof doc.risk_accepted === "object") {
