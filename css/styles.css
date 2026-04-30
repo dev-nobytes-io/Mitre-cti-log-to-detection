@@ -294,6 +294,47 @@ button.danger { color: var(--bad); border-color: var(--bad); }
 .mermaid-host svg { max-width: 100%; height: auto; transition: opacity 220ms ease; }
 .mermaid-host.rendering { opacity: 0.45; transform: scale(0.995); }
 
+/* chunk 14: strategy-card expansion + per-channel toggles */
+.strategy-card.parked { opacity: 0.6; }
+.strat-expansion .strat-an-block {
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border-left: 2px solid var(--border);
+  background: rgba(255,255,255,0.015);
+  border-radius: 3px;
+}
+.strat-an-block.an-lit { border-left-color: #3fb950; }
+.strat-an-block.an-unlit { border-left-color: #d29922; }
+.strat-an-h { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.strat-an-h .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
+.strat-an-block.an-lit .strat-an-h .dot { background: #3fb950; }
+.strat-an-block.an-unlit .strat-an-h .dot { background: #d29922; }
+.strat-ls-list { margin-top: 6px; padding-left: 18px; }
+.strat-ls-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 12px;
+  border-bottom: 1px dashed rgba(255,255,255,0.04);
+}
+.strat-ls-row:last-of-type { border-bottom: none; }
+.strat-ls-row .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border); }
+.strat-ls-row.ls-on .dot { background: #3fb950; }
+.strat-ls-row.ls-off .dot { background: rgba(139, 148, 158, 0.3); color: var(--muted); }
+.strat-ls-row.ls-off { color: var(--muted); }
+.strat-tech-list { display: flex; flex-wrap: wrap; gap: 4px 6px; padding-top: 4px; }
+.strat-tech-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  background: rgba(110, 193, 255, 0.1);
+  color: #6ec1ff;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.strat-tech-chip.more { background: rgba(139, 148, 158, 0.1); color: var(--muted); }
+
 /* chunk 13: data-component picker on the manual-entry form */
 .component-map-form { margin-top: 8px; padding: 8px 10px; background: rgba(255,255,255,0.02); border: 1px dashed var(--border); border-radius: 4px; }
 .component-map-form > summary { cursor: pointer; font-size: 12px; color: var(--text); }

@@ -4,6 +4,7 @@ import {
   effectiveComponentScores, setSourceScore, setComponentScore, setAllSources,
   effectiveLogSourceScores, setLogSourceScore, setAllLogSources, removeLogSource,
   setLogSourceEnabled, setLogSourceComponentRefs,
+  setStrategyEnabled, isStrategyEnabled,
   setRiskAccepted, isRiskAccepted, logSourceRiskKey,
   exportYaml, importYaml, exportJson, importJson,
 } from "./inventory.js";
@@ -877,6 +878,7 @@ function runCoverage() {
     {
       analyticAggregation: state.filters.analyticAggregation || "min",
       riskAccepted: state.inventory.risk_accepted || null,
+      disabledStrategies: state.inventory.disabled_strategies || null,
     },
   );
 }
@@ -922,33 +924,118 @@ function renderDetectionStrategies(coverage) {
 
   let html = "";
   for (const st of strategies) {
+    const stratEnabled = isStrategyEnabled(state.inventory, st.id);
     const ans = (st.analyticIds || []).map(id => state.attack.analyticById?.get(id)).filter(Boolean);
     const litAns = [];
     let logSourceCount = 0;
+    const analyticDetail = [];
     for (const a of ans) {
-      const lsList = (a.logSourceIds || []).map(id => ({ id, score: lsScores.get(id)?.score || 0 }));
+      const lsList = (a.logSourceIds || []).map(id => {
+        const ls = state.attack.logSourceById?.get(id);
+        return { id, name: ls?.name || "?", channel: ls?.channel || "", score: lsScores.get(id)?.score || 0 };
+      });
       logSourceCount += lsList.length;
       const scores = lsList.map(l => l.score);
-      if (lsList.length > 0 && scores.every(s => s > 0)) {
-        litAns.push({ id: a.id, name: a.name, score: aggregate(scores) });
-      }
+      const aLit = lsList.length > 0 && scores.every(s => s > 0);
+      const aScore = aLit ? aggregate(scores) : 0;
+      analyticDetail.push({ id: a.id, name: a.name, lit: aLit, score: aScore, lsList });
+      if (aLit) litAns.push({ id: a.id, name: a.name, score: aScore });
     }
-    const lit = litAns.length > 0;
+    const lit = stratEnabled && litAns.length > 0;
     const score = lit ? Math.max(...litAns.map(a => a.score)) : 0;
     const detectedTechIds = techniqueByStratId.get(st.id) || new Set();
     const detectedCount = detectedTechIds.size || (st.techniqueIds?.length || 0);
+    const expanded = state.expanded.has(`strat:${st.id}`);
+    const cardCls = lit ? " lit" : (stratEnabled ? "" : " parked");
     html += `
-      <div class="ds-row strategy-card${lit ? " lit" : ""}">
-        <div></div>
+      <div class="ds-row strategy-card${cardCls}" data-strat-id="${escapeAttr(st.id)}">
+        <div class="strat-toggle" data-strat-toggle="${escapeAttr(st.id)}" style="cursor:pointer;color:var(--muted)">${expanded ? "▾" : "▸"}</div>
         <div>
           <div class="ds-name">${escapeHtml(st.name)} <span style="color:var(--muted);font-weight:400">${escapeHtml(st.attackId || "")}</span></div>
-          <div class="ds-meta">${ans.length} analytic${ans.length === 1 ? "" : "s"} · ${logSourceCount} log-source ref${logSourceCount === 1 ? "" : "s"} · ${detectedCount} technique${detectedCount === 1 ? "" : "s"} detected</div>
+          <div class="ds-meta">${ans.length} analytic${ans.length === 1 ? "" : "s"} · ${logSourceCount} log-source ref${logSourceCount === 1 ? "" : "s"} · ${detectedCount} technique${detectedCount === 1 ? "" : "s"} detected${stratEnabled ? "" : " · <strong>parked</strong>"}</div>
         </div>
-        <div class="ds-meta">${litAns.length}/${ans.length} analytics lit</div>
+        <div class="ds-meta">
+          ${litAns.length}/${ans.length} analytics lit
+          <label class="enable-toggle" style="margin-left:8px">
+            <input type="checkbox" data-strat-enable="${escapeAttr(st.id)}" ${stratEnabled ? "checked" : ""} />
+            <span>${stratEnabled ? "enabled" : "parked"}</span>
+          </label>
+        </div>
         <div><span class="score-badge s${Math.round(score)}">${lit ? score.toFixed(1) : "○"}</span></div>
-      </div>`;
+      </div>
+      ${expanded ? renderStrategyExpansion(st, analyticDetail, detectedTechIds) : ""}`;
   }
   root.innerHTML = html;
+
+  // Wire interactions
+  root.querySelectorAll("[data-strat-toggle]").forEach(el => {
+    el.addEventListener("click", () => {
+      const id = el.getAttribute("data-strat-toggle");
+      const key = `strat:${id}`;
+      if (state.expanded.has(key)) state.expanded.delete(key);
+      else state.expanded.add(key);
+      refreshAll();
+    });
+  });
+  root.querySelectorAll("input[data-strat-enable]").forEach(box => {
+    box.addEventListener("change", () => {
+      const id = box.getAttribute("data-strat-enable");
+      setStrategyEnabled(state.inventory, id, box.checked);
+      saveInventory(state.inventory);
+      refreshAll();
+    });
+  });
+  root.querySelectorAll("input[data-ls-enable-strat]").forEach(box => {
+    box.addEventListener("change", () => {
+      const [name, channel] = box.dataset.lsEnableStrat.split("||");
+      setLogSourceEnabled(state.inventory, name, channel, box.checked);
+      saveInventory(state.inventory);
+      refreshAll();
+    });
+  });
+}
+
+// chunk 14: strategy expansion. Lists each analytic, the log sources
+// it requires (with score + lit dot), and an enable/disable toggle on
+// every channel so users can park a feed straight from this tab.
+function renderStrategyExpansion(strat, analyticDetail, detectedTechIds) {
+  const techList = Array.from(detectedTechIds).sort();
+  const anHtml = analyticDetail.length === 0
+    ? `<div class="comp-meta">This strategy has no analytics yet.</div>`
+    : analyticDetail.map(a => `<div class="strat-an-block ${a.lit ? "an-lit" : "an-unlit"}">
+        <div class="strat-an-h">
+          <span class="dot"></span>
+          ⚙ <strong>${escapeHtml(a.name)}</strong>
+          <span style="color:var(--muted);font-size:11px;margin-left:6px">${a.lit ? `lit · score ${a.score.toFixed(1)}` : "unlit · need every log source &gt; 0"}</span>
+        </div>
+        ${a.lsList.length === 0
+          ? `<div class="comp-meta" style="padding-left:18px">No log sources required.</div>`
+          : `<div class="strat-ls-list">
+              ${a.lsList.map(ls => `<div class="strat-ls-row ${ls.score > 0 ? "ls-on" : "ls-off"}">
+                <span class="dot"></span>
+                <strong>${escapeHtml(ls.name)}</strong>
+                <span style="color:var(--muted)">/ ${escapeHtml(ls.channel || "")}</span>
+                <span class="score-badge s${ls.score}">${ls.score}</span>
+                <label class="enable-toggle" style="margin-left:auto">
+                  <input type="checkbox" data-ls-enable-strat="${escapeAttr(`${ls.name || ""}||${ls.channel || ""}`)}" ${state.inventory.log_sources?.find(e => (e.name||"").toLowerCase() === (ls.name||"").toLowerCase() && (e.channel||"").toLowerCase() === (ls.channel||"").toLowerCase())?.enabled === false ? "" : "checked"} />
+                  <span>park</span>
+                </label>
+              </div>`).join("")}
+            </div>`}
+      </div>`).join("");
+  const techHtml = techList.length === 0
+    ? `<div class="comp-meta">No techniques are currently lit by this strategy.</div>`
+    : `<div class="strat-tech-list">${techList.slice(0, 12).map(t => `<span class="strat-tech-chip">${escapeHtml(t)}</span>`).join("")}${techList.length > 12 ? `<span class="strat-tech-chip more">+${techList.length - 12} more</span>` : ""}</div>`;
+  return `<div class="comp-expansion strat-expansion">
+    <div class="comp-section">
+      <div class="comp-section-h">Required analytics &amp; log sources</div>
+      ${anHtml}
+    </div>
+    <div class="comp-section">
+      <div class="comp-section-h">Techniques this strategy lights up</div>
+      ${techHtml}
+    </div>
+  </div>`;
 }
 
 // --- Coverage tab ---
