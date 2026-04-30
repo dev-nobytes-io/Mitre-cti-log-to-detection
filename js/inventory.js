@@ -87,6 +87,7 @@ function migrate(inv) {
     if (!inv.risk_accepted[k]) inv.risk_accepted[k] = {};
   }
   if (!inv.disabled_strategies) inv.disabled_strategies = {};
+  if (!inv.manually_covered_strategies) inv.manually_covered_strategies = {};
   return inv;
 }
 
@@ -334,6 +335,26 @@ export function isStrategyEnabled(inv, strategyId) {
   return !inv.disabled_strategies[strategyId];
 }
 
+// chunk 17: manually claim coverage for a detection strategy.
+// Distinct from disabled_strategies: this is a user override
+// asserting "I have a SIEM rule / EDR detection / whatever for this
+// strategy even if the bundle's analytic spec says I'd need more log
+// sources." Marked-covered strategies count as lit at score = 5
+// (full claimed coverage) regardless of the chain. Lets users get
+// past the "0 coverage no matter what I do" state when their SIEM
+// implements detections in ways the log-source chain can't model.
+export function setStrategyManuallyCovered(inv, strategyId, covered) {
+  if (!inv.manually_covered_strategies) inv.manually_covered_strategies = {};
+  if (covered) inv.manually_covered_strategies[strategyId] = true;
+  else delete inv.manually_covered_strategies[strategyId];
+  return inv;
+}
+
+export function isStrategyManuallyCovered(inv, strategyId) {
+  if (!inv.manually_covered_strategies) return false;
+  return !!inv.manually_covered_strategies[strategyId];
+}
+
 // chunk 13: replace the component_refs[] for an existing log source
 // without touching its score / comment / enabled flag. Used by the
 // inventory tab's "Edit components" dialog on custom rows.
@@ -451,6 +472,7 @@ export function exportYaml(inv) {
     })),
     risk_accepted: inv.risk_accepted || { log_sources: {}, components: {}, techniques: {}, groups: {} },
     disabled_strategies: inv.disabled_strategies || {},
+    manually_covered_strategies: inv.manually_covered_strategies || {},
   };
   // Use jsyaml from CDN (loaded globally)
   return window.jsyaml.dump(doc, { lineWidth: 120, noRefs: true });
@@ -510,6 +532,9 @@ function importDoc(doc) {
   }
   if (doc.disabled_strategies && typeof doc.disabled_strategies === "object") {
     inv.disabled_strategies = { ...doc.disabled_strategies };
+  }
+  if (doc.manually_covered_strategies && typeof doc.manually_covered_strategies === "object") {
+    inv.manually_covered_strategies = { ...doc.manually_covered_strategies };
   }
   return inv;
 }

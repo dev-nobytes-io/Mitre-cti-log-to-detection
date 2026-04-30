@@ -20,9 +20,11 @@
 // Each row exposes V2-native fields plus legacy aliases
 // (totalDetectingComponents, coveredComponents, coveringComponents,
 // maxScore) so navigator.js, threats.js, and existing UI keep working.
-export function computeCoverage(attack, logSourceScores, { analyticAggregation = "min", riskAccepted = null, disabledStrategies = null } = {}) {
+export function computeCoverage(attack, logSourceScores, { analyticAggregation = "min", riskAccepted = null, disabledStrategies = null, manuallyCoveredStrategies = null } = {}) {
   const isRisk = (kind, key) => !!(riskAccepted && riskAccepted[kind] && riskAccepted[kind][key]);
   const isStratDisabled = (sid) => !!(disabledStrategies && disabledStrategies[sid]);
+  const isStratManual = (sid) => !!(manuallyCoveredStrategies && manuallyCoveredStrategies[sid]);
+  const MANUAL_SCORE = 5; // user-claimed coverage = full credit
   const aggregate = analyticAggregation === "avg"
     ? (vals) => vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0
     : (vals) => vals.length ? Math.min(...vals) : 0;
@@ -43,18 +45,26 @@ export function computeCoverage(attack, logSourceScores, { analyticAggregation =
 
   // 2. Score each detection strategy. Disabled strategies (chunk 14)
   // are kept in the map with lit=false so the UI can still render
-  // them as "parked"; they contribute 0 to coverage.
-  const strategyScores = new Map(); // strategyId -> { lit, score, name, attackId, analytics: [...], disabled }
+  // them as "parked"; they contribute 0 to coverage. Manually-covered
+  // strategies (chunk 17) light up at MANUAL_SCORE regardless of the
+  // chain — the user has asserted they have a detection in place even
+  // if the bundle's analytic spec wouldn't validate it.
+  const strategyScores = new Map(); // strategyId -> { lit, score, name, attackId, analytics: [...], disabled, manual }
   for (const st of attack.detectionStrategies || []) {
     const disabled = isStratDisabled(st.id);
+    const manual = !disabled && isStratManual(st.id);
     const ans = (st.analyticIds || []).map(id => {
       const a = analyticScores.get(id);
       return a ? { id, ...a } : null;
     }).filter(Boolean);
     const litAns = ans.filter(a => a.lit);
-    const lit = !disabled && litAns.length > 0;
-    const score = lit ? Math.max(...litAns.map(a => a.score)) : 0;
-    strategyScores.set(st.id, { lit, score, name: st.name, attackId: st.attackId, analytics: ans, disabled });
+    const chainLit = !disabled && litAns.length > 0;
+    const lit = chainLit || manual;
+    let score = 0;
+    if (chainLit && manual) score = Math.max(MANUAL_SCORE, ...litAns.map(a => a.score));
+    else if (chainLit) score = Math.max(...litAns.map(a => a.score));
+    else if (manual) score = MANUAL_SCORE;
+    strategyScores.set(st.id, { lit, score, name: st.name, attackId: st.attackId, analytics: ans, disabled, manual });
   }
 
   // 3. Score each technique via its detecting strategies.
