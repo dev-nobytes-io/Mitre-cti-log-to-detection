@@ -67,16 +67,50 @@ function setStatus(text, kind = "") {
   el.className = "status" + (kind ? " " + kind : "");
 }
 
+// chunk 20: per-render score caches so multiple renderers in the same
+// refreshAll() pass don't recompute effectiveLogSourceScores /
+// effectiveComponentScores 6+ times. Cleared at the start of every
+// pass and populated lazily on first access.
+function lsScoresMemo() {
+  if (!state.renderCache) return effectiveLogSourceScores(state.inventory, state.attack);
+  if (!state.renderCache.lsScores) state.renderCache.lsScores = effectiveLogSourceScores(state.inventory, state.attack);
+  return state.renderCache.lsScores;
+}
+function compScoresMemo() {
+  if (!state.renderCache) return effectiveComponentScores(state.inventory, state.attack);
+  if (!state.renderCache.compScores) state.renderCache.compScores = effectiveComponentScores(state.inventory, state.attack);
+  return state.renderCache.compScores;
+}
+function coverageMemo() {
+  if (!state.renderCache) return runCoverage();
+  if (!state.renderCache.coverage) state.renderCache.coverage = runCoverage();
+  return state.renderCache.coverage;
+}
+
 // Re-render every view that depends on inventory or attack state. Cheap to
 // run; coverage / mermaid are recomputed lazily and bail early when there's
 // no attack data loaded.
 function refreshAll() {
+  state.renderCache = { lsScores: null, compScores: null, coverage: null };
   renderInventory();
   renderComponents();
   renderCoverage();
   renderGraph();
   renderExport();
   renderThreats();
+}
+
+// chunk 20: RAF-debounced refresh so a burst of checkbox toggles
+// coalesces into one re-render. Used by hot paths (picker enable
+// checkboxes, score selects, bulk enable / disable).
+let _refreshScheduled = false;
+function scheduleRefresh() {
+  if (_refreshScheduled) return;
+  _refreshScheduled = true;
+  requestAnimationFrame(() => {
+    _refreshScheduled = false;
+    refreshAll();
+  });
 }
 
 // Show a sticky banner across the top — stays visible until the user
@@ -240,7 +274,7 @@ $("#invPickerSelectVisible")?.addEventListener("click", () => {
     setLogSourceEnabled(state.inventory, ls.name, ls.channel, true);
   }
   saveInventory(state.inventory);
-  refreshAll();
+  scheduleRefresh();
 });
 $("#invPickerClearVisible")?.addEventListener("click", () => {
   if (!state.attack) return;
@@ -251,7 +285,7 @@ $("#invPickerClearVisible")?.addEventListener("click", () => {
     setLogSourceEnabled(state.inventory, ls.name, ls.channel, false);
   }
   saveInventory(state.inventory);
-  refreshAll();
+  scheduleRefresh();
 });
 
 // Manual log-source entry. Lets the user type a (name, channel) tuple
@@ -418,8 +452,8 @@ function renderInventory() {
     return;
   }
 
-  const compScores = effectiveComponentScores(state.inventory, state.attack);
-  const lsScores = effectiveLogSourceScores(state.inventory, state.attack);
+  const compScores = compScoresMemo();
+  const lsScores = lsScoresMemo();
 
   // Inventory summary spans the whole attack model (filter-independent).
   const totalSources = state.attack.dataSources.length;
@@ -468,7 +502,7 @@ function renderActivationStrip(lsScores, compScores) {
   const lsEnabled = (state.inventory.log_sources || []).filter(e => e.enabled !== false && Number(e.score) > 0).length;
   const compsActive = Array.from(compScores.values()).filter(v => v.score > 0).length;
   // Use the V2 coverage engine's strategy-lit count via runCoverage.
-  const cov = runCoverage();
+  const cov = coverageMemo();
   const stratsLit = (cov?.rows || []).reduce((acc, r) => acc + (r.litStrategies || 0), 0);
   const litUniqueStrats = new Set();
   for (const r of cov?.rows || []) for (const c of r.contributing || []) if (c.lit) litUniqueStrats.add(c.id);
@@ -548,7 +582,7 @@ function renderInventoryPicker(root, lsScores, compScores) {
       const [name, channel] = box.dataset.pickEnable.split("||");
       setLogSourceEnabled(state.inventory, name, channel, box.checked);
       saveInventory(state.inventory);
-      refreshAll();
+      scheduleRefresh();
     });
   });
   root.querySelectorAll("select[data-kind='ls']").forEach(sel => {
@@ -556,7 +590,7 @@ function renderInventoryPicker(root, lsScores, compScores) {
       const [name, channel] = sel.dataset.key.split("||");
       setLogSourceScore(state.inventory, name, channel, Number(sel.value));
       saveInventory(state.inventory);
-      refreshAll();
+      scheduleRefresh();
     });
   });
   root.querySelectorAll("input[data-pick-comment]").forEach(inp => {
@@ -892,8 +926,8 @@ function renderComponents() {
     if (stats) stats.innerHTML = "";
     return;
   }
-  const compScores = effectiveComponentScores(state.inventory, state.attack);
-  const lsScores = effectiveLogSourceScores(state.inventory, state.attack);
+  const compScores = compScoresMemo();
+  const lsScores = lsScoresMemo();
   const filter = state.filters.component;
   const minScore = state.filters.componentScore;
   const all = state.attack.dataComponents.map(dc => {
@@ -1067,7 +1101,7 @@ function renderDetectionStrategies(coverage) {
   // Compute per-strategy display info using the same helpers V2 used.
   // We re-derive lit/score per analytic so the card matches whatever
   // V2 just computed — duplicate work but cheap (<150 strategies).
-  const lsScores = state.attack.logSources ? effectiveLogSourceScores(state.inventory, state.attack) : new Map();
+  const lsScores = state.attack.logSources ? lsScoresMemo() : new Map();
   const aggMode = state.filters.analyticAggregation || "min";
   const aggregate = aggMode === "avg"
     ? (vs) => vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : 0
@@ -1227,7 +1261,7 @@ function renderCoverage() {
     renderDetectionStrategies(null); // clears the summary
     return;
   }
-  const cov = runCoverage();
+  const cov = coverageMemo();
   renderDetectionStrategies(cov);
 
   const v2 = cov.engine === "v2";
@@ -1348,7 +1382,7 @@ $("#downloadDetectionsLayer")?.addEventListener("click", () => {
 
 function downloadThreatLayer(mode) {
   if (!state.attack) { setStatus("Load ATT&CK first", "error"); return; }
-  const cov = runCoverage();
+  const cov = coverageMemo();
   const rowsByStix = new Map(cov.rows.map(r => [r.stixId, r]));
   const layer = buildThreatLayer({ attack: state.attack, threats: state.threats, mode, coverageRowsByStixId: rowsByStix });
   if (!layer) { setStatus("Select at least one group first", "error"); return; }
@@ -1425,7 +1459,7 @@ function renderGapAnalysis() {
   const tableRoot = $("#threatTable");
   const statsRoot = $("#threatStats");
   if (!state.attack) return;
-  const cov = runCoverage();
+  const cov = coverageMemo();
   const rowsByStix = new Map(cov.rows.map(r => [r.stixId, r]));
   const gap = gapAnalysis(state.threats, state.attack, rowsByStix);
 
@@ -1560,7 +1594,7 @@ function renderGraph() {
   // Populate selectors lazily
   populateGraphSelectors();
 
-  const compScores = effectiveComponentScores(state.inventory, state.attack);
+  const compScores = compScoresMemo();
 
   // Source -> components -> techniques
   const ds = state.attack.dataSourceById.get(state.graph.sourceId);
@@ -1622,7 +1656,7 @@ function renderLogSourcePicker() {
     root.innerHTML = `<div class="mermaid-empty" style="padding:8px">No log sources match "${escapeHtml(state.graph.logSourceFilter)}".</div>`;
     return;
   }
-  const lsScores = effectiveLogSourceScores(state.inventory, state.attack);
+  const lsScores = lsScoresMemo();
   let html = "";
   for (const ls of visible) {
     const checked = sel.has(ls.id) ? "checked" : "";
@@ -1662,7 +1696,7 @@ function renderLogSourceCascade() {
     host.innerHTML = `<div class="mermaid-empty">Pick log sources above to see what they unlock.</div>`;
     return;
   }
-  const lsScores = effectiveLogSourceScores(state.inventory, state.attack);
+  const lsScores = lsScoresMemo();
   const source = logSourceCascadeDiagram({
     attack: state.attack,
     selectedLogSourceIds: state.graph.selectedLogSources,
@@ -1711,7 +1745,7 @@ $("#copyLayerBtn").addEventListener("click", async () => {
 
 function currentLayer() {
   if (!state.attack) { setStatus("Load ATT&CK first", "error"); return null; }
-  const cov = runCoverage();
+  const cov = coverageMemo();
   return buildNavigatorLayer({
     coverage: cov,
     attack: state.attack,
