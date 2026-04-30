@@ -2,9 +2,16 @@
 // Each test gets its own isolated browser context (fresh localStorage,
 // fresh IndexedDB, fresh viewport) so suites are order-independent.
 
-import { chromium } from "/opt/node22/lib/node_modules/playwright/index.mjs";
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
+
+// In the local sandbox Playwright lives at /opt/node22/lib/node_modules; in CI
+// it's installed via `npm install --no-save playwright@1.56.1` and resolved
+// relative to the repo. Try the sandbox path first, fall back to the standard
+// node resolution.
+const SANDBOX_PLAYWRIGHT = "/opt/node22/lib/node_modules/playwright/index.mjs";
+const playwright = await import(existsSync(SANDBOX_PLAYWRIGHT) ? SANDBOX_PLAYWRIGHT : "playwright");
+const { chromium } = playwright;
 
 export const REPO_ROOT   = resolve(import.meta.dirname, "..");
 export const SAMPLES_DIR = resolve(REPO_ROOT, "samples");
