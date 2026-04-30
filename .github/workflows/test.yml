@@ -5,6 +5,13 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Silences the "Node.js 20 actions are deprecated" warning by forcing every
+# JavaScript-based action (checkout, setup-node, setup-python, cache, etc.)
+# onto the runner's Node 24 toolchain ahead of the June 2026 default switch.
+# Once those actions ship Node-24-native releases this can be removed.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   test:
     runs-on: ubuntu-latest
