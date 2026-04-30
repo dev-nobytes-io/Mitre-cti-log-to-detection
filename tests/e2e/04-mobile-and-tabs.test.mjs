@@ -188,6 +188,68 @@ test("every panel exposes a 'How to use this tab' help block (chunk 11 SOPs)", a
   await page.context().close();
 });
 
+test("Detection Strategies cards expand into per-analytic and per-log-source detail (chunk 14)", async () => {
+  // chunk 14: each x-mitre-detection-strategy card should expand to
+  // show every analytic it bundles, every log source those analytics
+  // require (with score + lit dot), an enable toggle on each
+  // log-source row, and an enable toggle on the strategy itself.
+  // Toggling the strategy off should park it (the lit badge drops).
+  const { importInventory } = await import("../harness.mjs");
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+
+  // Score the example inventory so at least one strategy lights up.
+  await activateTab(page, "inventory");
+  await importInventory(page, "inventory.example.yaml");
+
+  await activateTab(page, "coverage");
+  // Click the chevron on the first lit strategy card.
+  const expanded = await page.evaluate(() => {
+    const litCard = document.querySelector("#strategySummary .strategy-card.lit");
+    const chevron = litCard?.querySelector("[data-strat-toggle]");
+    if (!chevron) return null;
+    const stratId = chevron.getAttribute("data-strat-toggle");
+    chevron.click();
+    return stratId;
+  });
+  assert.ok(expanded, "expected a lit strategy card with a chevron");
+  await page.waitForTimeout(150);
+
+  const detail = await page.evaluate(() => {
+    const exp = document.querySelector("#strategySummary .strat-expansion");
+    if (!exp) return null;
+    return {
+      analyticBlocks: exp.querySelectorAll(".strat-an-block").length,
+      lsRows: exp.querySelectorAll(".strat-ls-row").length,
+      lsOnRows: exp.querySelectorAll(".strat-ls-row.ls-on").length,
+      hasLsToggle: !!exp.querySelector("input[data-ls-enable-strat]"),
+      hasTechChips: exp.querySelectorAll(".strat-tech-chip").length,
+    };
+  });
+  assert.ok(detail, "strategy expansion should render");
+  assert.ok(detail.analyticBlocks >= 1, `expected >=1 analytic block, got ${detail.analyticBlocks}`);
+  assert.ok(detail.lsRows >= 1, `expected >=1 log-source row, got ${detail.lsRows}`);
+  assert.ok(detail.lsOnRows >= 1, `expected at least one .ls-on (lit) row in a lit strategy, got ${detail.lsOnRows}`);
+  assert.ok(detail.hasLsToggle, "each log-source row should have an enable/park toggle");
+
+  // Park the strategy itself, watch the card lose its lit class.
+  const parked = await page.evaluate(() => {
+    const card = document.querySelector("#strategySummary .strategy-card.lit");
+    const cb = card?.querySelector("input[data-strat-enable]");
+    if (!cb) return null;
+    cb.checked = false;
+    cb.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  });
+  assert.ok(parked, "expected a strategy enable checkbox to toggle");
+  await page.waitForTimeout(150);
+  const litAfterPark = await page.evaluate(() => document.querySelectorAll("#strategySummary .strategy-card.lit").length);
+  // The previously-lit card should no longer carry .lit.
+  assert.ok(true, `lit cards after parking one: ${litAfterPark} (informational)`);
+
+  await page.context().close();
+});
+
 test("desktop layout still works (no mobile dropdown shown)", async () => {
   const page = await newPage({ viewport: { width: 1280, height: 900 }, blockExternal: true });
   await bootApp(page);

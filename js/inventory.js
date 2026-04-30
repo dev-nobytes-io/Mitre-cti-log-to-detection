@@ -86,6 +86,7 @@ function migrate(inv) {
   for (const k of ["log_sources", "components", "techniques", "groups"]) {
     if (!inv.risk_accepted[k]) inv.risk_accepted[k] = {};
   }
+  if (!inv.disabled_strategies) inv.disabled_strategies = {};
   return inv;
 }
 
@@ -317,6 +318,22 @@ export function setLogSourceScore(inv, name, channel, score, opts = {}) {
   return inv;
 }
 
+// chunk 14: park an entire detection strategy. Stored as
+// inv.disabled_strategies[stratId] = true. Disabled strategies are
+// skipped entirely by computeCoverage — their analytics don't count
+// toward technique coverage.
+export function setStrategyEnabled(inv, strategyId, enabled) {
+  if (!inv.disabled_strategies) inv.disabled_strategies = {};
+  if (enabled) delete inv.disabled_strategies[strategyId];
+  else inv.disabled_strategies[strategyId] = true;
+  return inv;
+}
+
+export function isStrategyEnabled(inv, strategyId) {
+  if (!inv.disabled_strategies) return true;
+  return !inv.disabled_strategies[strategyId];
+}
+
 // chunk 13: replace the component_refs[] for an existing log source
 // without touching its score / comment / enabled flag. Used by the
 // inventory tab's "Edit components" dialog on custom rows.
@@ -433,6 +450,7 @@ export function exportYaml(inv) {
       component_refs: Array.isArray(e.component_refs) ? [...e.component_refs] : [],
     })),
     risk_accepted: inv.risk_accepted || { log_sources: {}, components: {}, techniques: {}, groups: {} },
+    disabled_strategies: inv.disabled_strategies || {},
   };
   // Use jsyaml from CDN (loaded globally)
   return window.jsyaml.dump(doc, { lineWidth: 120, noRefs: true });
@@ -489,6 +507,9 @@ function importDoc(doc) {
       techniques:  { ...(doc.risk_accepted.techniques || {}) },
       groups:      { ...(doc.risk_accepted.groups || {}) },
     };
+  }
+  if (doc.disabled_strategies && typeof doc.disabled_strategies === "object") {
+    inv.disabled_strategies = { ...doc.disabled_strategies };
   }
   return inv;
 }
