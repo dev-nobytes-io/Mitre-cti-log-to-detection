@@ -294,6 +294,50 @@ button.danger { color: var(--bad); border-color: var(--bad); }
 .mermaid-host svg { max-width: 100%; height: auto; transition: opacity 220ms ease; }
 .mermaid-host.rendering { opacity: 0.45; transform: scale(0.995); }
 
+/* chunk 12: Data Components tab — colour-coded rows + expandable details */
+.tech-row.comp-row, #componentTable .tech-row.header {
+  grid-template-columns: 24px minmax(0, 1fr) 140px 180px 90px 70px;
+  border-left: 3px solid transparent;
+}
+.tech-row.comp-covered  { border-left-color: #3fb950; background: rgba(63, 185, 80, 0.06); }
+.tech-row.comp-partial  { border-left-color: #d29922; background: rgba(210, 153, 34, 0.06); }
+.tech-row.comp-uncovered { border-left-color: transparent; }
+.cov-tag {
+  display: inline-block; padding: 1px 6px; border-radius: 3px;
+  background: rgba(63, 185, 80, 0.15); color: #3fb950;
+  font-size: 10px; font-weight: 600; margin-left: 6px; vertical-align: middle;
+}
+.unc-tag {
+  display: inline-block; padding: 1px 6px; border-radius: 3px;
+  background: rgba(139, 148, 158, 0.12); color: var(--muted);
+  font-size: 10px; font-weight: 600; margin-left: 6px; vertical-align: middle;
+}
+.comp-expansion {
+  background: rgba(255,255,255,0.02);
+  border-left: 3px solid var(--border);
+  padding: 10px 14px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 24px;
+  font-size: 12px;
+}
+.comp-section-h { font-weight: 600; color: var(--text); margin-bottom: 6px; font-size: 12px; }
+.comp-meta { color: var(--muted); font-size: 11px; }
+.comp-ls-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 0; border-bottom: 1px dashed rgba(255,255,255,0.04);
+}
+.comp-ls-row:last-of-type { border-bottom: none; }
+.comp-ls-row .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
+.comp-ls-row.ls-on .dot { background: #3fb950; }
+.comp-ls-row.ls-off .dot { background: rgba(139, 148, 158, 0.3); }
+.comp-ls-row.ls-on { color: var(--text); }
+.comp-ls-row.ls-off { color: var(--muted); }
+.comp-an-row { padding: 3px 0; color: var(--text); }
+@media (max-width: 760px) {
+  .comp-expansion { grid-template-columns: 1fr; padding: 10px 12px; }
+}
+
 /* chunk 11: per-tab SOPs / inline help */
 .tab-help {
   background: var(--panel);
