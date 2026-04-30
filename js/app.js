@@ -510,17 +510,23 @@ function renderComponents() {
       score,
       hasOverride: !!eff?.hasOverride,
       techCount: dc.techniqueIds.length,
+      logSourceCount: (dc.logSourceIds || []).length,
+      analyticCount: (dc.analyticIds || []).length,
     };
   });
   const total = all.length;
   const covered = all.filter(c => c.score > 0).length;
   const good = all.filter(c => c.score >= 3).length;
+  const totalAnalytics = state.attack.analytics?.length || 0;
+  const totalLogSources = state.attack.logSources?.length || 0;
   if (stats) {
     stats.innerHTML = `
       <div class="stat-card"><div class="label">Total components</div><div class="value">${total}</div></div>
       <div class="stat-card"><div class="label">Covered (score &gt; 0)</div><div class="value">${covered}</div><div class="sub">${pct(covered/Math.max(total,1))}</div></div>
       <div class="stat-card"><div class="label">Good (score &ge; 3)</div><div class="value">${good}</div></div>
       <div class="stat-card"><div class="label">Uncovered</div><div class="value" style="color:var(--bad)">${total - covered}</div></div>
+      <div class="stat-card"><div class="label">Log sources (total)</div><div class="value">${totalLogSources}</div></div>
+      <div class="stat-card"><div class="label">Analytics (total)</div><div class="value">${totalAnalytics}</div></div>
     `;
   }
   const rows = all.filter(c => {
@@ -531,14 +537,14 @@ function renderComponents() {
     return true;
   }).sort((a, b) => b.score - a.score || a.sourceName.localeCompare(b.sourceName) || a.name.localeCompare(b.name));
 
-  let html = `<div class="tech-row header"><div>Component</div><div>Data source</div><div>Techniques</div><div></div><div>Score</div></div>`;
+  let html = `<div class="tech-row header"><div>Component</div><div>Data source</div><div>Log sources / Analytics</div><div>Techniques</div><div>Score</div></div>`;
   for (const c of rows.slice(0, 1500)) {
     html += `
       <div class="tech-row">
-        <div><strong>${escapeHtml(c.name)}</strong></div>
+        <div><strong>${escapeHtml(c.name)}</strong>${c.hasOverride ? ' <span style="color:var(--muted);font-size:11px">(scored)</span>' : ""}</div>
         <div style="color:var(--muted)">${escapeHtml(c.sourceName)}</div>
+        <div style="color:var(--muted);font-size:11px">${c.logSourceCount} log src · ${c.analyticCount} analytic${c.analyticCount === 1 ? "" : "s"}</div>
         <div style="color:var(--muted);font-size:11px">${c.techCount} tech</div>
-        <div style="color:var(--muted);font-size:11px">${c.hasOverride ? "override" : ""}</div>
         <div><span class="score-badge s${c.score}">${c.score}</span></div>
       </div>
     `;
@@ -575,6 +581,76 @@ function runCoverage() {
   );
 }
 
+// --- Detection Strategies summary (tab 4 header) ---
+// Renders one card per x-mitre-detection-strategy in the loaded bundle,
+// with lit/unlit status, the analytics it bundles, and the techniques it
+// detects. Drives off the v2 coverage rows so the same min/avg toggle
+// applies. When V2 isn't active (e.g. legacy bundle without
+// detection-strategy STIX objects) the section stays empty.
+function renderDetectionStrategies(coverage) {
+  const root = $("#strategySummary");
+  const countEl = $("#strategySummaryCount");
+  if (!root) return;
+  const strategies = state.attack?.detectionStrategies || [];
+  if (countEl) countEl.textContent = String(strategies.length);
+  if (!state.attack || strategies.length === 0) {
+    root.innerHTML = `<div style="padding:12px;color:var(--muted)">No detection strategies in this bundle (legacy v1 data uses the technique table below).</div>`;
+    return;
+  }
+
+  // Per-strategy lit/unlit + score derived from V2 coverage. If the
+  // active engine isn't V2 (no logSourceScores), strategies fall back
+  // to "unlit" with score 0.
+  const techniqueByStratId = new Map(); // strategyId -> Set(techniqueAttackId)
+  if (coverage && coverage.engine === "v2") {
+    for (const row of coverage.rows) {
+      for (const c of row.contributing || []) {
+        if (!c.lit) continue;
+        if (!techniqueByStratId.has(c.id)) techniqueByStratId.set(c.id, new Set());
+        techniqueByStratId.get(c.id).add(row.attackId);
+      }
+    }
+  }
+  // Compute per-strategy display info using the same helpers V2 used.
+  // We re-derive lit/score per analytic so the card matches whatever
+  // V2 just computed — duplicate work but cheap (<150 strategies).
+  const lsScores = state.attack.logSources ? effectiveLogSourceScores(state.inventory, state.attack) : new Map();
+  const aggMode = state.filters.analyticAggregation || "min";
+  const aggregate = aggMode === "avg"
+    ? (vs) => vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : 0
+    : (vs) => vs.length ? Math.min(...vs) : 0;
+
+  let html = "";
+  for (const st of strategies) {
+    const ans = (st.analyticIds || []).map(id => state.attack.analyticById?.get(id)).filter(Boolean);
+    const litAns = [];
+    let logSourceCount = 0;
+    for (const a of ans) {
+      const lsList = (a.logSourceIds || []).map(id => ({ id, score: lsScores.get(id)?.score || 0 }));
+      logSourceCount += lsList.length;
+      const scores = lsList.map(l => l.score);
+      if (lsList.length > 0 && scores.every(s => s > 0)) {
+        litAns.push({ id: a.id, name: a.name, score: aggregate(scores) });
+      }
+    }
+    const lit = litAns.length > 0;
+    const score = lit ? Math.max(...litAns.map(a => a.score)) : 0;
+    const detectedTechIds = techniqueByStratId.get(st.id) || new Set();
+    const detectedCount = detectedTechIds.size || (st.techniqueIds?.length || 0);
+    html += `
+      <div class="ds-row strategy-card${lit ? " lit" : ""}">
+        <div></div>
+        <div>
+          <div class="ds-name">${escapeHtml(st.name)} <span style="color:var(--muted);font-weight:400">${escapeHtml(st.attackId || "")}</span></div>
+          <div class="ds-meta">${ans.length} analytic${ans.length === 1 ? "" : "s"} · ${logSourceCount} log-source ref${logSourceCount === 1 ? "" : "s"} · ${detectedCount} technique${detectedCount === 1 ? "" : "s"} detected</div>
+        </div>
+        <div class="ds-meta">${litAns.length}/${ans.length} analytics lit</div>
+        <div><span class="score-badge s${Math.round(score)}">${lit ? score.toFixed(1) : "○"}</span></div>
+      </div>`;
+  }
+  root.innerHTML = html;
+}
+
 // --- Coverage tab ---
 $("#techFilter").addEventListener("input", e => { state.filters.tech = e.target.value.toLowerCase(); renderCoverage(); });
 $("#tacticFilter").addEventListener("change", e => { state.filters.tactic = e.target.value; renderCoverage(); });
@@ -587,9 +663,11 @@ function renderCoverage() {
   if (!state.attack) {
     root.innerHTML = `<div style="padding:20px;color:var(--muted)">Load ATT&amp;CK data first.</div>`;
     stats.innerHTML = "";
+    renderDetectionStrategies(null); // clears the summary
     return;
   }
   const cov = runCoverage();
+  renderDetectionStrategies(cov);
 
   const v2 = cov.engine === "v2";
   const detectableSub = v2 ? "have detection strategies" : "have data-component detections";
