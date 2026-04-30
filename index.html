@@ -128,8 +128,12 @@
 
     <section class="panel" id="tab-coverage" role="tabpanel">
       <h2>4. Detection strategies</h2>
-      <p>Techniques you can detect, derived from the data components your inventory covers. Score = max source quality &times; covered/total component ratio.</p>
+      <p>Detection strategies (top) bundle one or more analytics, each tied to specific log sources. Lit strategies surface the techniques you can detect (table below).</p>
       <div class="stats" id="coverageStats"></div>
+      <details id="strategySummaryDetails" open>
+        <summary class="strategy-summary-toggle">Detection strategies in this bundle (<span id="strategySummaryCount">0</span>)</summary>
+        <div id="strategySummary" class="ds-list"></div>
+      </details>
       <div class="row">
         <input type="search" id="techFilter" placeholder="Filter techniques (id, name, tactic)&hellip;" />
         <select id="tacticFilter"><option value="">All tactics</option></select>

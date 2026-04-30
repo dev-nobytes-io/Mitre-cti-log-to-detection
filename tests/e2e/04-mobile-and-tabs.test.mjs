@@ -39,6 +39,45 @@ test("every tab activates and renders its panel without errors", async () => {
   await page.context().close();
 });
 
+test("Detection Strategies tab shows real STIX strategies + lit/unlit cards", async () => {
+  // chunk 5: tab 4 gains a top section that lists every
+  // x-mitre-detection-strategy. After importing inventory.example.yaml
+  // (which scores log sources tied to a known analytic) at least one
+  // strategy card should be marked .lit and the Detection Components
+  // tab should expose log-source / analytic counts.
+  const { importInventory } = await import("../harness.mjs");
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+
+  await activateTab(page, "inventory");
+  await importInventory(page, "inventory.example.yaml");
+
+  await activateTab(page, "coverage");
+  const summary = await page.evaluate(() => {
+    const cards = document.querySelectorAll("#strategySummary .strategy-card");
+    return {
+      count: cards.length,
+      lit: Array.from(cards).filter(c => c.classList.contains("lit")).length,
+      countLabel: document.querySelector("#strategySummaryCount")?.textContent || "",
+    };
+  });
+  assert.ok(summary.count >= 3, `expected >=3 strategy cards, got ${summary.count}`);
+  assert.ok(summary.lit >= 1, `expected at least 1 lit strategy after scoring sysmon/1 etc., got ${summary.lit}`);
+  assert.equal(summary.countLabel, String(summary.count), "summary count label should match card count");
+
+  await activateTab(page, "components");
+  const compStats = await page.evaluate(() => {
+    const total = document.querySelector("#componentStats .stat-card .value")?.textContent;
+    const cards = Array.from(document.querySelectorAll("#componentStats .stat-card"));
+    const labels = cards.map(c => c.querySelector(".label")?.textContent?.trim());
+    return { total, labels };
+  });
+  assert.ok(compStats.labels.includes("Log sources (total)"), `expected log-sources stat, got: ${JSON.stringify(compStats.labels)}`);
+  assert.ok(compStats.labels.includes("Analytics (total)"), `expected analytics stat, got: ${JSON.stringify(compStats.labels)}`);
+
+  await page.context().close();
+});
+
 test("desktop layout still works (no mobile dropdown shown)", async () => {
   const page = await newPage({ viewport: { width: 1280, height: 900 }, blockExternal: true });
   await bootApp(page);
