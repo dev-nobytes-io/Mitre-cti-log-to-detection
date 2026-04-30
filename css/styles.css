@@ -294,6 +294,35 @@ button.danger { color: var(--bad); border-color: var(--bad); }
 .mermaid-host svg { max-width: 100%; height: auto; transition: opacity 220ms ease; }
 .mermaid-host.rendering { opacity: 0.45; transform: scale(0.995); }
 
+/* chunk 9: by-name inventory grouping toggle */
+.grouping-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.grouping-toggle label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.grouping-toggle input[type="radio"] { margin: 0; }
+
+/* chunk 9: by-name view rows + add-channel form */
+.dc-row.by-name-row { display: grid; grid-template-columns: minmax(0, 1fr) 110px 130px auto; align-items: center; gap: 6px 12px; }
+.dc-row.by-name-row.parked { opacity: 0.55; }
+.dc-row.by-name-row .enable-cell { font-size: 11px; }
+.enable-toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); cursor: pointer; }
+.enable-toggle input[type=checkbox] { margin: 0; }
+.add-channel-row { background: rgba(255,255,255,0.02); }
+.add-channel-form { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; padding: 4px 0; }
+.add-channel-form .dc-meta { flex-basis: 100%; font-size: 12px; }
+.add-channel-form input[type=text] { flex: 1 1 140px; min-width: 120px; }
+.add-channel-form select { flex: 0 0 70px; }
+.add-channel-form button { flex: 0 0 auto; }
+
 /* chunk 8: log-source picker for the utility cascade diagram */
 .log-source-picker {
   max-height: 220px;
@@ -516,6 +545,15 @@ footer {
      touch height. */
   .log-source-picker { grid-template-columns: 1fr; max-height: 280px; }
   .log-source-pick { padding: 8px 6px; min-height: 38px; font-size: 13px; }
+
+  /* chunk 9: by-name view rows stack to a 2-column compact card on
+     phone. The score select and enable toggle drop to a second row
+     under the name + comment so taps land on real targets. */
+  .dc-row.by-name-row { display: grid !important; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; }
+  .dc-row.by-name-row > div:first-child { grid-column: 1 / -1; }
+  .dc-row.by-name-row .enable-cell { grid-column: 1; }
+  .add-channel-form input[type=text] { flex: 1 1 100%; }
+  .grouping-toggle { flex-direction: column; align-items: flex-start; gap: 4px; }
 
   .group-row { padding: 10px 12px 10px 36px; position: relative; }
   .group-row > input[type=checkbox] { position: absolute; left: 10px; top: 12px; width: 18px; height: 18px; }

@@ -3,6 +3,7 @@ import {
   loadInventory, saveInventory, resetInventory,
   effectiveComponentScores, setSourceScore, setComponentScore, setAllSources,
   effectiveLogSourceScores, setLogSourceScore, setAllLogSources, removeLogSource,
+  setLogSourceEnabled,
   exportYaml, importYaml, exportJson, importJson,
 } from "./inventory.js";
 import { computeCoverage } from "./coverage.js";
@@ -31,6 +32,7 @@ const state = {
     group: "",
     threatStatus: "",
     analyticAggregation: "min", // how to aggregate log-source scores into an analytic score (V2 chain)
+    inventoryGrouping: "name", // chunk 9: 'name' (group by log-source name) or 'component' (legacy by-data-component view)
   },
   expanded: new Set(),
   graph: {
@@ -209,6 +211,12 @@ function populateTacticFilter() {
 $("#dsFilter").addEventListener("input", e => { state.filters.ds = e.target.value.toLowerCase(); renderInventory(); });
 $("#platformFilter").addEventListener("change", e => { state.filters.platform = e.target.value; renderInventory(); });
 $("#onlyScored")?.addEventListener("change", e => { state.filters.onlyScored = e.target.checked; renderInventory(); });
+document.querySelectorAll('input[name="inventoryGrouping"]').forEach(r => {
+  r.addEventListener("change", e => {
+    state.filters.inventoryGrouping = e.target.value;
+    renderInventory();
+  });
+});
 
 // Manual log-source entry. Lets the user type a (name, channel) tuple
 // the bundle doesn't know about — e.g. a vendor-specific event ID, a
@@ -329,17 +337,24 @@ function renderInventory() {
   const scoredComps = Array.from(compScores.values()).filter(v => v.score > 0).length;
   const totalLogSources = state.attack.logSources?.length || 0;
   const scoredLogSources = Array.from(lsScores.values()).filter(v => v.score > 0).length;
+  // chunk 9: count log sources the user explicitly parked
+  // (enabled === false). They round-trip on export but contribute 0 to
+  // coverage, so surface the count as its own pill.
+  const disabledLogSources = (state.inventory.log_sources || []).filter(e => e.enabled === false).length;
   if (summary) {
     summary.className = "inv-summary" + ((scoredLogSources + scoredSources) > 0 ? " populated" : "");
     summary.innerHTML = `
       <div class="pill"><strong>${scoredLogSources} / ${totalLogSources}</strong>log sources scored</div>
-      <div class="pill"><strong>${scoredSources} / ${totalSources}</strong>data sources scored</div>
       <div class="pill"><strong>${scoredComps} / ${totalComps}</strong>data components covered</div>
+      <div class="pill"><strong>${disabledLogSources}</strong>log sources disabled</div>
       <div class="pill"><strong>${state.inventory.name || "Default"}</strong>inventory name</div>
     `;
   }
 
-  return renderLogSourceInventory(root, compScores, lsScores);
+  if (state.filters.inventoryGrouping === "component") {
+    return renderLogSourceInventory(root, compScores, lsScores);
+  }
+  return renderInventoryByName(root, lsScores);
 }
 
 // v2 Log-Source inventory view (default). Renders log sources grouped by
@@ -472,6 +487,185 @@ function renderLogSourceInventory(root, compScores, lsScores) {
       refreshAll();
     });
   });
+}
+
+// chunk 9: by-name inventory view. Groups every (name, channel) tuple
+// under its `name` (sysmon, windows-security, powershell, ...) so the
+// user can see all event-codes from a single tool side by side. Each
+// row has a score select, an enable/disable checkbox (disabled rows
+// keep their saved score for export but contribute 0 to coverage),
+// and — for custom user-added entries — a × remove. Each group also
+// gets an inline "+ Add channel under <name>" form so users can score
+// new event codes without leaving the tab.
+function renderInventoryByName(root, lsScores) {
+  const onlyScored = !!state.filters.onlyScored;
+  // Map<name, { rows: Array<{ id, channel, score, enabled, comment, isCustom, ls? }>, total, scored }>
+  const groups = new Map();
+  const ensure = (name) => {
+    if (!groups.has(name)) groups.set(name, { rows: [], total: 0, scored: 0 });
+    return groups.get(name);
+  };
+
+  // Add every bundle log source.
+  for (const ls of state.attack.logSources || []) {
+    const entry = (state.inventory.log_sources || []).find(e =>
+      (e.name || "").toLowerCase() === (ls.name || "").toLowerCase() &&
+      (e.channel || "").toLowerCase() === (ls.channel || "").toLowerCase()
+    );
+    const eff = lsScores.get(ls.id);
+    const score = eff?.savedScore ?? 0;
+    const enabled = entry ? entry.enabled !== false : true;
+    const g = ensure(ls.name || "(unnamed)");
+    g.rows.push({
+      id: ls.id, name: ls.name, channel: ls.channel,
+      score, enabled,
+      comment: entry?.comment || "",
+      isCustom: false,
+      componentCount: ls.componentIds?.length || 0,
+    });
+    g.total += 1;
+    if (score > 0 && enabled) g.scored += 1;
+  }
+
+  // Add custom entries (those not in the bundle). Show them in their
+  // matching name group so users see them alongside the bundled rows.
+  const knownKeys = new Set(state.attack.logSources?.map(ls =>
+    ((ls.name || "") + "|" + (ls.channel || "")).toLowerCase()
+  ));
+  for (const e of state.inventory.log_sources || []) {
+    const key = ((e.name || "") + "|" + (e.channel || "")).toLowerCase();
+    if (knownKeys.has(key)) continue;
+    const g = ensure(e.name || "(unnamed)");
+    g.rows.push({
+      id: `custom:${key}`,
+      name: e.name, channel: e.channel,
+      score: clampInt(e.score) || 0,
+      enabled: e.enabled !== false,
+      comment: e.comment || "",
+      isCustom: true,
+      componentCount: 0,
+    });
+    g.total += 1;
+    if ((Number(e.score) || 0) > 0 && e.enabled !== false) g.scored += 1;
+  }
+
+  if (groups.size === 0) {
+    root.innerHTML = `<div style="padding:20px;color:var(--muted)">No log sources in this bundle. Use the "+ Add log source by hand" form above to add custom entries.</div>`;
+    return;
+  }
+
+  // Sort group names alphabetically; sort rows within each group by channel.
+  const sortedNames = Array.from(groups.keys()).sort((a, b) => a.localeCompare(b));
+  let html = "";
+  for (const name of sortedNames) {
+    const g = groups.get(name);
+    if (onlyScored && g.scored === 0) continue;
+    g.rows.sort((a, b) => (a.channel || "").localeCompare(b.channel || ""));
+    const expandKey = `name:${name}`;
+    const expanded = state.expanded.has(expandKey);
+    const disabledCount = g.rows.filter(r => !r.enabled).length;
+    html += `
+      <div class="ds-row" data-ds-id="${escapeAttr(expandKey)}">
+        <div class="toggle" data-toggle="${escapeAttr(expandKey)}">${expanded ? "▾" : "▸"}</div>
+        <div>
+          <div class="ds-name">${escapeHtml(name)}</div>
+          <div class="ds-meta">${g.scored} of ${g.total} channels scored${disabledCount ? ` · ${disabledCount} disabled` : ""}</div>
+        </div>
+        <div class="ds-meta">${g.total} channel${g.total === 1 ? "" : "s"}</div>
+        <div class="ds-meta">${g.rows.filter(r => r.isCustom).length ? `${g.rows.filter(r => r.isCustom).length} custom` : ""}</div>
+      </div>
+      <div class="ds-components ${expanded ? "open" : ""}" data-components-for="${escapeAttr(expandKey)}">
+        ${g.rows.map(r => `
+          <div class="dc-row by-name-row${r.enabled ? "" : " parked"}" data-ls-row="${escapeAttr(r.id)}">
+            <div>
+              <div class="dc-name">${escapeHtml(r.channel || "(no channel)")}${r.isCustom ? ' <span style="color:var(--muted);font-weight:400">(custom)</span>' : ""}</div>
+              <div class="dc-meta">${escapeHtml(r.comment || (r.componentCount ? `feeds ${r.componentCount} component${r.componentCount === 1 ? "" : "s"}` : "no comment"))}</div>
+            </div>
+            <div class="dc-meta enable-cell">
+              <label class="enable-toggle">
+                <input type="checkbox" data-ls-enable="${escapeAttr(`${r.name || ""}||${r.channel || ""}`)}" ${r.enabled ? "checked" : ""} />
+                <span>${r.enabled ? "enabled" : "parked"}</span>
+              </label>
+            </div>
+            <div>${scoreSelect(r.score, "ls", `${r.name || ""}||${r.channel || ""}`)}</div>
+            ${r.isCustom ? `<div><button class="danger" data-remove-custom="${escapeAttr(`${r.name || ""}||${r.channel || ""}`)}" title="Remove custom entry">×</button></div>` : ""}
+          </div>
+        `).join("")}
+        <div class="dc-row add-channel-row">
+          <form class="add-channel-form" data-add-channel-name="${escapeAttr(name)}">
+            <span class="dc-meta">+ Add channel under <strong>${escapeHtml(name)}</strong>:</span>
+            <input type="text" placeholder="channel / event ID" data-add-channel-channel />
+            <select data-add-channel-score>
+              <option value="0">0</option><option value="1">1</option><option value="2">2</option>
+              <option value="3" selected>3</option><option value="4">4</option><option value="5">5</option>
+            </select>
+            <input type="text" placeholder="comment (optional)" data-add-channel-comment />
+            <button type="submit">Add</button>
+          </form>
+        </div>
+      </div>
+    `;
+  }
+  root.innerHTML = html || `<div style="padding:20px;color:var(--muted)">No groups match your filter.</div>`;
+
+  // Wire interactions
+  root.querySelectorAll("[data-toggle]").forEach(el => {
+    el.addEventListener("click", () => {
+      const id = el.getAttribute("data-toggle");
+      if (state.expanded.has(id)) state.expanded.delete(id);
+      else state.expanded.add(id);
+      renderInventory();
+    });
+  });
+  root.querySelectorAll("select[data-kind='ls']").forEach(sel => {
+    sel.addEventListener("change", () => {
+      const [name, channel] = sel.dataset.key.split("||");
+      setLogSourceScore(state.inventory, name, channel, Number(sel.value));
+      saveInventory(state.inventory);
+      refreshAll();
+    });
+  });
+  root.querySelectorAll("input[type=checkbox][data-ls-enable]").forEach(box => {
+    box.addEventListener("change", () => {
+      const [name, channel] = box.dataset.lsEnable.split("||");
+      setLogSourceEnabled(state.inventory, name, channel, box.checked);
+      saveInventory(state.inventory);
+      refreshAll();
+    });
+  });
+  root.querySelectorAll("[data-remove-custom]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const [name, channel] = btn.getAttribute("data-remove-custom").split("||");
+      removeLogSource(state.inventory, name, channel);
+      saveInventory(state.inventory);
+      refreshAll();
+    });
+  });
+  root.querySelectorAll("form.add-channel-form").forEach(form => {
+    form.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      const name = form.getAttribute("data-add-channel-name");
+      const channel = form.querySelector("[data-add-channel-channel]")?.value.trim();
+      const score = Number(form.querySelector("[data-add-channel-score]")?.value || 0);
+      const comment = form.querySelector("[data-add-channel-comment]")?.value.trim();
+      if (!channel) {
+        setStatus("Provide a channel / event ID", "error");
+        return;
+      }
+      setLogSourceScore(state.inventory, name, channel, score, { comment });
+      saveInventory(state.inventory);
+      // Keep the group expanded so the user sees the new row appear.
+      state.expanded.add(`name:${name}`);
+      setStatus(`Added ${name}/${channel} (score ${score})`, "ok");
+      refreshAll();
+    });
+  });
+}
+
+function clampInt(n) {
+  const v = Number(n);
+  if (Number.isNaN(v)) return 0;
+  return Math.max(0, Math.min(5, Math.round(v)));
 }
 
 // --- Data Components tab ---
