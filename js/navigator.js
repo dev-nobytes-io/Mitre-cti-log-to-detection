@@ -39,7 +39,7 @@ export function buildNavigatorLayer({ coverage, attack, name = "Data source cove
       layer: "4.5",
     },
     domain: DOMAIN_TO_LAYER_DOMAIN[attack.meta?.domain] || "enterprise-attack",
-    description: description || "Detection coverage from data source inventory",
+    description: description || "Detection coverage from log source inventory",
     filters: {
       platforms: Array.from(new Set(techniques.flatMap(t => attack.techniqueByAttackId.get(t.techniqueID)?.platforms || []))),
     },
@@ -56,7 +56,7 @@ export function buildNavigatorLayer({ coverage, attack, name = "Data source cove
     ],
     metadata: [
       { name: "Generated", value: new Date().toISOString() },
-      { name: "Tool", value: "ATT&CK Data Source Inventory web app" },
+      { name: "Tool", value: "ATT&CK Log Source Inventory web app" },
       { name: "ATT&CK domain", value: attack.meta?.domain || "" },
       { name: "ATT&CK version", value: attack.meta?.version || "" },
     ],

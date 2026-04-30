@@ -1,6 +1,6 @@
 # Sample threat-group selection (DeTT&CT group-administration v1.0 schema).
 # Import this on the Threats tab to overlay the techniques used by these
-# groups against your data-source coverage.
+# groups against your log-source coverage.
 #
 # Group IDs are MITRE ATT&CK group IDs (G####). Names also work as a
 # fallback. Aliases (e.g. "Cozy Bear" for APT29) are accepted.

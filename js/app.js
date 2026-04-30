@@ -159,7 +159,7 @@ async function runLoad({ domain, url, force }) {
     setBanner(
       `<strong>Network fetch from github.com/mitre/cti failed.</strong> ` +
       `Your browser couldn't reach the MITRE CTI feed (corporate proxy, TLS interception, or offline). ` +
-      `Falling back to the bundled offline ATT&CK (38 data sources, 38 representative techniques, 20 groups). ` +
+      `Falling back to the bundled offline ATT&CK (38 component categories, 38 representative techniques, 20 groups). ` +
       `Use this for the workflow demo, or upload a local STIX file on the MITRE CTI tab.`,
       "warn"
     );
@@ -175,7 +175,7 @@ async function runLoad({ domain, url, force }) {
 
 function onAttackLoaded(source) {
   const a = state.attack;
-  setStatus(`Loaded ${a.dataSources.length} data sources, ${a.techniques.length} techniques, ${a.groups?.length || 0} groups (${source})`, "ok");
+  setStatus(`Loaded ${a.dataSources.length} component categories, ${a.techniques.length} techniques, ${a.groups?.length || 0} groups (${source})`, "ok");
   renderSetupSummary();
   populatePlatformFilter();
   populateTacticFilter();
@@ -196,7 +196,7 @@ function renderSetupSummary() {
     <div class="grid">
       <div class="stat"><span class="label">Domain</span><span class="value">${escapeHtml(a.meta.domain)}</span></div>
       <div class="stat"><span class="label">Version</span><span class="value">${escapeHtml(String(a.meta.version))}</span></div>
-      <div class="stat"><span class="label">Data sources</span><span class="value">${a.dataSources.length}</span></div>
+      <div class="stat"><span class="label">Component categories</span><span class="value">${a.dataSources.length}</span></div>
       <div class="stat"><span class="label">Data components</span><span class="value">${a.dataComponents.length}</span></div>
       <div class="stat"><span class="label">Techniques</span><span class="value">${a.techniques.length}</span></div>
       <div class="stat"><span class="label">Loaded</span><span class="value">${escapeHtml(a.meta.fetchedAt || "")}</span></div>
@@ -349,11 +349,11 @@ $("#inventoryFile").addEventListener("change", async ev => {
     const counts = inventoryStats(state.inventory);
     refreshAll();
     if (counts.sources === 0 && counts.logSources === 0) {
-      setStatus(`Imported ${file.name} but it had no log sources or data sources`, "error");
+      setStatus(`Imported ${file.name} but it had no log sources`, "error");
     } else {
       const parts = [];
       if (counts.logSources) parts.push(`${counts.logSources} log sources`);
-      if (counts.sources) parts.push(`${counts.sources} data sources`);
+      if (counts.sources) parts.push(`${counts.sources} legacy v1 entries`);
       if (counts.overrides) parts.push(`${counts.overrides} component overrides`);
       setStatus(`Imported ${file.name}: ${parts.join(", ")}`, "ok");
       setBanner(`Imported <strong>${escapeHtml(file.name)}</strong>: ${parts.join(", ")}. Switch to <a href="#" data-goto="components">Data Components</a> or <a href="#" data-goto="coverage">Detection Strategies</a> to see the impact.`, "ok");
@@ -514,7 +514,7 @@ function renderLogSourceInventory(root, compScores, lsScores) {
             return `<div class="dc-row" style="padding-left:24px">
               <div>
                 <div class="dc-name">${escapeHtml(ls.name)} <span style="color:var(--muted);font-weight:400">/ ${escapeHtml(ls.channel || "")}</span></div>
-                <div class="dc-meta">${eff?.hasV2Override ? "user-set" : "projected from data-source score"}</div>
+                <div class="dc-meta">${eff?.hasV2Override ? "user-set" : "projected from inventory score"}</div>
               </div>
               <div class="dc-meta">${ls.componentIds?.length || 0} comp${(ls.componentIds?.length || 0) === 1 ? "" : "s"}</div>
               <div>${scoreSelect(score, "ls", `${ls.name}||${ls.channel || ""}`)}</div>
@@ -790,7 +790,7 @@ function renderComponents() {
   // which log sources feed each component and which analytics
   // reference it. Coverage class drives a left-border + soft tint:
   //   covered (>=3) green, partial (1-2) amber, uncovered grey.
-  let html = `<div class="tech-row header"><div></div><div>Component</div><div>Data source</div><div>Log sources / Analytics</div><div>Techniques</div><div>Score</div></div>`;
+  let html = `<div class="tech-row header"><div></div><div>Component</div><div>Category</div><div>Log sources / Analytics</div><div>Techniques</div><div>Score</div></div>`;
   for (const c of rows.slice(0, 1500)) {
     const coverageCls = c.score >= 3 ? "comp-covered" : (c.score >= 1 ? "comp-partial" : "comp-uncovered");
     const expanded = state.expanded.has(`comp:${c.id}`);
@@ -1396,7 +1396,7 @@ function renderGraph() {
     });
     renderMermaidInto(sourceHost, src);
   } else {
-    sourceHost.innerHTML = `<div class="mermaid-empty">Pick a data source above.</div>`;
+    sourceHost.innerHTML = `<div class="mermaid-empty">Pick a component category above.</div>`;
   }
 
   // Technique -> components
@@ -1501,7 +1501,7 @@ function renderLogSourceCascade() {
 function populateGraphSelectors() {
   const sel = $("#graphSourceSelect");
   if (sel.options.length <= 1 && state.attack) {
-    sel.innerHTML = `<option value="">Select a data source…</option>` +
+    sel.innerHTML = `<option value="">Select a component category…</option>` +
       state.attack.dataSources.map(ds => `<option value="${escapeAttr(ds.id)}">${escapeHtml(ds.name)} (${escapeHtml(ds.attackId || "")})</option>`).join("");
   }
   if (state.graph.sourceId) sel.value = state.graph.sourceId;
@@ -1585,7 +1585,7 @@ function pct(n) { return `${Math.round((n || 0) * 100)}%`; }
         state.attack = await loadOfflineBundle();
         onAttackLoaded("offline-bundle");
         setBanner(
-          `Loaded the <strong>bundled offline ATT&CK</strong> (38 data sources, 38 representative techniques, 20 groups). ` +
+          `Loaded the <strong>bundled offline ATT&CK</strong> (38 component categories, 38 representative techniques, 20 groups). ` +
           `Click <em>Load / Refresh</em> on tab 1 (<em>MITRE CTI Data</em>) to upgrade to the live MITRE feed.`,
           "warn"
         );

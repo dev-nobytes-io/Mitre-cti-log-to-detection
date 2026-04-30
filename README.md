@@ -32,7 +32,7 @@ also runs as a CLI / library. This app is a 5-minute,
 zero-install browser UI for the same flow:
 
 1. Load ATT&CK (cached in IndexedDB after the first fetch).
-2. Score each data source / component (0–5) for collection quality.
+2. Score each log source (0–5) for collection quality.
 3. See which techniques you can detect, weighted by score and component
    coverage ratio.
 4. Export an ATT&CK Navigator layer JSON.
@@ -44,7 +44,7 @@ typing anything. Pulled in from `samples/`:
 
 | Tab | File | What it is |
 |---|---|---|
-| MITRE CTI | `samples/stix-mini-bundle.json` | 24 KB synthetic STIX bundle — 6 data sources, 12 techniques, 5 groups. Loads instantly; great for kicking the tyres without the 30 MB enterprise bundle. |
+| MITRE CTI | `samples/stix-mini-bundle.json` | 24 KB synthetic STIX bundle — 6 component categories, 12 techniques, 5 groups. Loads instantly; great for kicking the tyres without the 30 MB enterprise bundle. |
 | Log Inventory | `samples/persona-mature-enterprise.yaml` | Enterprise SOC w/ Sysmon + EDR + Zeek — most things scored 3-5. |
 | Log Inventory | `samples/persona-cloud-saas.yaml` | Cloud-first SaaS — strong cloud + identity, dark on host telemetry. |
 | Log Inventory | `samples/persona-network-mssp.yaml` | Perimeter-only MSSP customer — strong network, zero host. |
@@ -134,13 +134,13 @@ The technique table shows everything filterable by tactic, name, and coverage cl
 Pulls MITRE ATT&CK threat-actor groups (`intrusion-set` STIX objects)
 out of the same bundle. Tick one or more (e.g. APT29, FIN7) and the
 app cross-references the techniques those groups use against your
-data-source coverage to surface:
+log-source coverage to surface:
 
 - **Covered** — group uses it and you'd detect it.
 - **Partial** — you have some of the detecting components.
 - **Gap** — group uses it and you have zero coverage.
 - **Undetectable** — ATT&CK has no `detects` relationships for it; no
-  data-source telemetry maps to it at all (a known blind zone).
+  log-source telemetry maps to it at all (a known blind zone).
 
 Two Navigator-layer exports:
 
@@ -162,17 +162,17 @@ diagrams:
 
   ```mermaid
   flowchart LR
-    log[/"Raw log"/] --> src["Data Source"]
+    log[/"Raw log"/] --> src["Component category"]
     src --> cmp["Data Component"]
     cmp -->|detects| tech["Technique"] --> tac["Tactic"]
     tech -. weighted by score .-> nav[("Navigator layer")]
   ```
 
-- **Per-source drill-down** — pick a data source to see its components and
+- **Per-category drill-down** — pick a component category to see its components and
   every technique they detect, colored by your visibility score.
 - **Per-technique view** — search for a technique to see which data
   components detect it (and which of yours cover them).
-- **Coverage overview** — top data sources ranked by detection breadth, with
+- **Coverage overview** — top component categories ranked by detection breadth, with
   a bar showing covered / total techniques.
 
 ### 6. Export
