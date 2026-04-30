@@ -120,6 +120,58 @@ test("manual entry: typing a custom log source persists, drives coverage if it m
   await page.context().close();
 });
 
+test("manual entry → component map: a custom log source mapped to a component drives that component's score (chunk 13)", async () => {
+  // chunk 13: when a user adds a custom (name, channel) tuple that the
+  // bundle doesn't know about (e.g. winlogbeat/9999), they can tick
+  // data components that the feed actually observes. Scoring then
+  // projects onto those components. Without the picker, the score had
+  // no upstream effect.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  await activateTab(page, "inventory");
+
+  // Open the manual-entry form and the nested component-map dropdown.
+  await page.click("#customLsForm summary");
+  await page.click(".component-map-form > summary");
+
+  // Find the first component checkbox and capture which component it represents.
+  const target = await page.evaluate(() => {
+    const box = document.querySelector("#customLsCompPicker input[data-comp-pick]");
+    if (!box) return null;
+    box.checked = true;
+    box.dispatchEvent(new Event("change", { bubbles: true }));
+    const label = box.closest("label")?.textContent?.trim().split("/")[0].trim();
+    return { compId: box.getAttribute("data-comp-pick"), label };
+  });
+  assert.ok(target, "component picker should expose at least one checkbox");
+
+  // Capture the component's current effective score on the Components tab.
+  await activateTab(page, "components");
+  const before = await page.evaluate((compId) => {
+    const row = document.querySelector(`#componentTable [data-comp-id="${compId}"]`);
+    return Number(row?.querySelector(".score-badge")?.textContent || "0");
+  }, target.compId);
+
+  // Add the custom tuple with a high score.
+  await activateTab(page, "inventory");
+  await page.fill("#customLsName", "winlogbeat");
+  await page.fill("#customLsChannel", "9999");
+  await page.selectOption("#customLsScore", "5");
+  await page.fill("#customLsComment", "vendor feed for component-X");
+  await page.click("#customLsAdd");
+  await page.waitForFunction(() => /Added log source winlogbeat\/9999.*mapped to 1 component/.test(document.querySelector("#statusText")?.textContent || ""));
+
+  // Confirm: the component the user mapped now has score 5 (from the projected custom log source).
+  await activateTab(page, "components");
+  const after = await page.evaluate((compId) => {
+    const row = document.querySelector(`#componentTable [data-comp-id="${compId}"]`);
+    return Number(row?.querySelector(".score-badge")?.textContent || "0");
+  }, target.compId);
+  assert.equal(after, Math.max(before, 5), `mapped component should pick up the projected score; before=${before}, after=${after}`);
+
+  await page.context().close();
+});
+
 test("Data Components tab highlights covered rows + expansion lists log sources feeding each component", async () => {
   // chunk 12: visible bug repro — after importing inventory.example.yaml,
   // the Components tab must (a) colour-code rows by score (covered/

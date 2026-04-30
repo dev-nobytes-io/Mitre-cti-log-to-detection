@@ -160,6 +160,12 @@
           <label>Comment <input type="text" id="customLsComment" placeholder="optional context" /></label>
           <button id="customLsAdd" class="primary">Add</button>
         </div>
+        <details class="component-map-form">
+          <summary>Map to data components <span class="muted-pill" id="customLsCompCount">0 selected</span></summary>
+          <p class="diagram-help">If your tuple doesn't match a known bundle log source, scoring it alone won't drive coverage. Tick the data components this feed actually observes (Process Creation, Logon Session Creation, etc.) and the score will project onto them.</p>
+          <input type="search" id="customLsCompFilter" placeholder="Filter components…" />
+          <div id="customLsCompPicker" class="component-picker"></div>
+        </details>
       </details>
       <div id="inventoryTable" class="ds-list"></div>
     </section>

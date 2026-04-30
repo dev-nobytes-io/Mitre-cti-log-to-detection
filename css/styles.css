@@ -294,6 +294,34 @@ button.danger { color: var(--bad); border-color: var(--bad); }
 .mermaid-host svg { max-width: 100%; height: auto; transition: opacity 220ms ease; }
 .mermaid-host.rendering { opacity: 0.45; transform: scale(0.995); }
 
+/* chunk 13: data-component picker on the manual-entry form */
+.component-map-form { margin-top: 8px; padding: 8px 10px; background: rgba(255,255,255,0.02); border: 1px dashed var(--border); border-radius: 4px; }
+.component-map-form > summary { cursor: pointer; font-size: 12px; color: var(--text); }
+.component-map-form .diagram-help { margin: 6px 0; }
+.component-picker {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  background: var(--panel);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 2px 12px;
+  margin-top: 6px;
+}
+.component-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.component-pick:hover { background: rgba(255,255,255,0.04); }
+.component-pick input[type=checkbox] { margin: 0; }
+
 /* chunk 12: Data Components tab — colour-coded rows + expandable details */
 .tech-row.comp-row, #componentTable .tech-row.header {
   grid-template-columns: 24px minmax(0, 1fr) 140px 180px 90px 70px;
