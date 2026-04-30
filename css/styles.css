@@ -294,6 +294,33 @@ button.danger { color: var(--bad); border-color: var(--bad); }
 .mermaid-host svg { max-width: 100%; height: auto; transition: opacity 220ms ease; }
 .mermaid-host.rendering { opacity: 0.45; transform: scale(0.995); }
 
+/* chunk 10: risk-accepted styling — clearly distinguish "we know we
+   don't have this and we accept the gap" from "we haven't decided" */
+.tech-row.risk-accepted { opacity: 0.65; background: rgba(217, 153, 34, 0.05); }
+.risk-accepted-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(217, 153, 34, 0.15);
+  color: #d29922;
+  font-size: 10px;
+  font-weight: 600;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.risk-toggle {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 3px;
+  font-size: 11px;
+  padding: 2px 6px;
+  margin-left: 6px;
+  cursor: pointer;
+}
+.risk-toggle:hover { background: rgba(217, 153, 34, 0.1); border-color: #d29922; color: #d29922; }
+.tech-row.risk-accepted .risk-toggle { background: rgba(217, 153, 34, 0.15); color: #d29922; border-color: #d29922; }
+
 /* chunk 9: by-name inventory grouping toggle */
 .grouping-toggle {
   display: inline-flex;

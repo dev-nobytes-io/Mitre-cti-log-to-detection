@@ -39,6 +39,12 @@ export function emptyInventory() {
     systems: [{ applicable_to: "all", description: "Default system" }],
     data_sources: [],
     log_sources: [],
+    // chunk 10: per-kind risk-accepted dictionaries. Keys are stable
+    // identifiers (lsKey for log sources, STIX component id, technique
+    // attackId, group attackId). Value true means "we know we don't
+    // have / can't get this and we accept the gap." Distinct from
+    // score = 0 (haven't decided / haven't onboarded).
+    risk_accepted: { log_sources: {}, components: {}, techniques: {}, groups: {} },
   };
 }
 
@@ -76,6 +82,10 @@ function migrate(inv) {
   if (!inv.log_sources) inv.log_sources = [];
   if (!inv.version) inv.version = 1;
   if (!inv.name) inv.name = "Default inventory";
+  if (!inv.risk_accepted) inv.risk_accepted = { log_sources: {}, components: {}, techniques: {}, groups: {} };
+  for (const k of ["log_sources", "components", "techniques", "groups"]) {
+    if (!inv.risk_accepted[k]) inv.risk_accepted[k] = {};
+  }
   return inv;
 }
 
@@ -330,6 +340,30 @@ export function removeLogSource(inv, name, channel) {
   return inv;
 }
 
+// chunk 10: risk-accepted helpers. `kind` ∈ {log_sources, components,
+// techniques, groups}; `key` is the stable id for that kind (lsKey
+// tuple, STIX component id, technique attackId, group attackId).
+const RISK_KINDS = new Set(["log_sources", "components", "techniques", "groups"]);
+
+export function setRiskAccepted(inv, kind, key, accepted) {
+  if (!RISK_KINDS.has(kind)) return inv;
+  if (!inv.risk_accepted) inv.risk_accepted = { log_sources: {}, components: {}, techniques: {}, groups: {} };
+  if (!inv.risk_accepted[kind]) inv.risk_accepted[kind] = {};
+  if (accepted) inv.risk_accepted[kind][key] = true;
+  else delete inv.risk_accepted[kind][key];
+  return inv;
+}
+
+export function isRiskAccepted(inv, kind, key) {
+  if (!RISK_KINDS.has(kind)) return false;
+  return !!(inv.risk_accepted && inv.risk_accepted[kind] && inv.risk_accepted[kind][key]);
+}
+
+// Resolve the risk-accepted key for a log source (name, channel) tuple.
+export function logSourceRiskKey(name, channel) {
+  return lsKey(name, channel);
+}
+
 function newEntry(name) {
   return {
     data_source_name: name,
@@ -368,6 +402,7 @@ export function exportYaml(inv) {
       enabled: e.enabled !== false,
       comment: e.comment || "",
     })),
+    risk_accepted: inv.risk_accepted || { log_sources: {}, components: {}, techniques: {}, groups: {} },
   };
   // Use jsyaml from CDN (loaded globally)
   return window.jsyaml.dump(doc, { lineWidth: 120, noRefs: true });
@@ -415,6 +450,14 @@ function importDoc(doc) {
       enabled: e.enabled !== false,
       comment: e.comment || "",
     })).filter(e => e.name || e.channel);
+  }
+  if (doc.risk_accepted && typeof doc.risk_accepted === "object") {
+    inv.risk_accepted = {
+      log_sources: { ...(doc.risk_accepted.log_sources || {}) },
+      components:  { ...(doc.risk_accepted.components || {}) },
+      techniques:  { ...(doc.risk_accepted.techniques || {}) },
+      groups:      { ...(doc.risk_accepted.groups || {}) },
+    };
   }
   return inv;
 }
