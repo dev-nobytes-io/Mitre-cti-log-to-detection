@@ -78,6 +78,50 @@ test("Detection Strategies tab shows real STIX strategies + lit/unlit cards", as
   await page.context().close();
 });
 
+test("Diagrams tab: log source utility cascade renders when log sources are picked", async () => {
+  // chunk 8: a multi-select picker on the Diagrams tab drives a Mermaid
+  // cascade Log Source -> Component -> Analytic -> Strategy -> Technique
+  // -> Threat group. Empty selection should show a friendly empty state;
+  // selecting a source that's referenced by analytics should produce an
+  // SVG diagram.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  await activateTab(page, "graph");
+
+  // Empty state first
+  let placeholder = await page.evaluate(() => document.querySelector("#diagramLogSourceCascade")?.textContent || "");
+  assert.match(placeholder, /Pick log sources/, `expected empty-state hint, got: ${placeholder}`);
+
+  // Pick the first checkbox the picker rendered. The offline bundle ships
+  // ~50+ log sources so there will always be at least one.
+  const checked = await page.evaluate(() => {
+    const box = document.querySelector("#logSourcePicker input[type=checkbox][data-ls-id]");
+    if (!box) return null;
+    box.checked = true;
+    box.dispatchEvent(new Event("change", { bubbles: true }));
+    return box.dataset.lsId;
+  });
+  assert.ok(checked, "picker should expose at least one log-source checkbox");
+
+  await page.waitForTimeout(400);
+
+  // Cascade should render an SVG, and the count chip must reflect 1 selected.
+  const result = await page.evaluate(() => ({
+    svg: !!document.querySelector("#diagramLogSourceCascade svg"),
+    count: document.querySelector("#logSourcePickerCount")?.textContent || "",
+  }));
+  assert.ok(result.svg, "expected an SVG inside #diagramLogSourceCascade after picking a log source");
+  assert.match(result.count, /1 selected/, `count chip should read '1 selected', got: ${result.count}`);
+
+  // Clear restores the empty state.
+  await page.click("#logSourcePickerClear");
+  await page.waitForTimeout(150);
+  placeholder = await page.evaluate(() => document.querySelector("#diagramLogSourceCascade")?.textContent || "");
+  assert.match(placeholder, /Pick log sources/, `cleared cascade should return to empty state, got: ${placeholder}`);
+
+  await page.context().close();
+});
+
 test("desktop layout still works (no mobile dropdown shown)", async () => {
   const page = await newPage({ viewport: { width: 1280, height: 900 }, blockExternal: true });
   await bootApp(page);

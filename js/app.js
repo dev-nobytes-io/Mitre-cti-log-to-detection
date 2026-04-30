@@ -7,7 +7,7 @@ import {
 } from "./inventory.js";
 import { computeCoverage } from "./coverage.js";
 import { buildNavigatorLayer } from "./navigator.js";
-import { conceptualDiagram, sourceDiagram, techniqueDiagram, overviewDiagram } from "./diagrams.js";
+import { conceptualDiagram, sourceDiagram, techniqueDiagram, overviewDiagram, logSourceCascadeDiagram } from "./diagrams.js";
 import {
   loadThreats, saveThreats, resetThreats,
   isGroupSelected, setGroupSelected, clearSelection,
@@ -38,6 +38,9 @@ const state = {
     techStixId: "",
     maxTech: 20,
     onlyCovered: false,
+    // chunk 8: log-source cascade picker
+    selectedLogSources: new Set(), // Set<logSourceId>
+    logSourceFilter: "",
   },
   mermaidReady: false,
   mermaidSeq: 0,
@@ -870,6 +873,22 @@ function statusLabel(s) { return ({ gap: "GAP", undetectable: "no-detect", parti
 $("#graphSourceSelect").addEventListener("change", e => { state.graph.sourceId = e.target.value; renderGraph(); });
 $("#graphMaxTech").addEventListener("change", e => { state.graph.maxTech = Math.max(1, Number(e.target.value) || 20); renderGraph(); });
 $("#graphOnlyCovered").addEventListener("change", e => { state.graph.onlyCovered = e.target.checked; renderGraph(); });
+
+// chunk 8: log-source utility picker
+$("#logSourcePickerFilter")?.addEventListener("input", e => {
+  state.graph.logSourceFilter = e.target.value.toLowerCase();
+  renderLogSourcePicker();
+});
+$("#logSourcePickerClear")?.addEventListener("click", () => {
+  state.graph.selectedLogSources.clear();
+  renderLogSourcePicker();
+  renderLogSourceCascade();
+});
+$("#logSourcePickerSelectVisible")?.addEventListener("click", () => {
+  for (const ls of visibleLogSourcesForPicker()) state.graph.selectedLogSources.add(ls.id);
+  renderLogSourcePicker();
+  renderLogSourceCascade();
+});
 $("#graphTechSearch").addEventListener("change", e => {
   if (!state.attack) return;
   const v = e.target.value.trim();
@@ -966,6 +985,93 @@ function renderGraph() {
 
   // Coverage overview
   renderMermaidInto(overviewHost, overviewDiagram({ attack: state.attack, componentScores: compScores }) || "");
+
+  // Log Source Utility cascade
+  renderLogSourcePicker();
+  renderLogSourceCascade();
+}
+
+// chunk 8: log-source picker. Returns the list of attack.logSources
+// matching the current filter. Used both for rendering and for
+// "Select all visible".
+function visibleLogSourcesForPicker() {
+  if (!state.attack) return [];
+  const filter = state.graph.logSourceFilter || "";
+  return state.attack.logSources.filter(ls => {
+    if (!filter) return true;
+    return (ls.name + "/" + (ls.channel || "")).toLowerCase().includes(filter);
+  });
+}
+
+// Render a checkbox-per-log-source list. Selected log sources persist
+// across re-renders via state.graph.selectedLogSources. The list is
+// scrollable so the diagram below stays in view.
+function renderLogSourcePicker() {
+  const root = $("#logSourcePicker");
+  if (!root) return;
+  if (!state.attack) {
+    root.innerHTML = `<div class="mermaid-empty" style="padding:8px">Load ATT&CK data first.</div>`;
+    return;
+  }
+  const visible = visibleLogSourcesForPicker();
+  const sel = state.graph.selectedLogSources;
+  $("#logSourcePickerCount").textContent = `${sel.size} selected`;
+  if (visible.length === 0) {
+    root.innerHTML = `<div class="mermaid-empty" style="padding:8px">No log sources match "${escapeHtml(state.graph.logSourceFilter)}".</div>`;
+    return;
+  }
+  const lsScores = effectiveLogSourceScores(state.inventory, state.attack);
+  let html = "";
+  for (const ls of visible) {
+    const checked = sel.has(ls.id) ? "checked" : "";
+    const score = lsScores.get(ls.id)?.score || 0;
+    const scoreCls = score > 0 ? "score-on" : "score-off";
+    html += `<label class="log-source-pick">
+      <input type="checkbox" data-ls-id="${escapeAttr(ls.id)}" ${checked} />
+      <strong>${escapeHtml(ls.name)}</strong>
+      <span style="color:var(--muted)">/ ${escapeHtml(ls.channel || "")}</span>
+      <span class="${scoreCls}">score ${score}</span>
+    </label>`;
+  }
+  root.innerHTML = html;
+  root.querySelectorAll("input[type=checkbox][data-ls-id]").forEach(box => {
+    box.addEventListener("change", () => {
+      const id = box.dataset.lsId;
+      if (box.checked) state.graph.selectedLogSources.add(id);
+      else state.graph.selectedLogSources.delete(id);
+      $("#logSourcePickerCount").textContent = `${state.graph.selectedLogSources.size} selected`;
+      renderLogSourceCascade();
+    });
+  });
+}
+
+// Render the cascade diagram. Smooth fade is driven by toggling a
+// `.rendering` class on the host before/after mermaid renders so users
+// see a brief opacity dip on each update instead of the diagram
+// snapping in place.
+function renderLogSourceCascade() {
+  const host = $("#diagramLogSourceCascade");
+  if (!host) return;
+  if (!state.attack) {
+    host.innerHTML = `<div class="mermaid-empty">Load ATT&CK data first.</div>`;
+    return;
+  }
+  if (state.graph.selectedLogSources.size === 0) {
+    host.innerHTML = `<div class="mermaid-empty">Pick log sources above to see what they unlock.</div>`;
+    return;
+  }
+  const lsScores = effectiveLogSourceScores(state.inventory, state.attack);
+  const source = logSourceCascadeDiagram({
+    attack: state.attack,
+    selectedLogSourceIds: state.graph.selectedLogSources,
+    logSourceScores: lsScores,
+    threats: state.threats,
+    analyticAggregation: state.filters.analyticAggregation || "min",
+  });
+  host.classList.add("rendering");
+  renderMermaidInto(host, source).finally(() => {
+    requestAnimationFrame(() => host.classList.remove("rendering"));
+  });
 }
 
 function populateGraphSelectors() {
