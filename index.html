@@ -45,7 +45,20 @@
   <main>
     <section class="panel active" id="tab-setup" role="tabpanel">
       <h2>1. MITRE CTI Data</h2>
-      <p>Pulls the latest <code>enterprise-attack.json</code> from <a href="https://github.com/mitre/cti" target="_blank" rel="noopener">github.com/mitre/cti</a>. Cached in your browser (IndexedDB) after the first load.</p>
+      <p>Pulls the latest <code>enterprise-attack.json</code> from <a href="https://github.com/mitre-attack/attack-stix-data" target="_blank" rel="noopener">github.com/mitre-attack/attack-stix-data</a>. Cached in your browser (IndexedDB) after the first load.</p>
+      <details class="tab-help">
+        <summary>📖 How to use this tab + Quick start workflow</summary>
+        <div class="tab-help-body">
+          <p><strong>Quick start (the whole app in 4 steps)</strong></p>
+          <ol>
+            <li><strong>Tab 1 (here):</strong> load ATT&amp;CK data — done automatically on first visit, click <em>Load / Refresh</em> to update.</li>
+            <li><strong>Tab 2 — Log Inventory:</strong> score every log feed you collect (sysmon/1, windows-security/4624, etc.). Scores flow up the chain Log Source → Component → Analytic → Detection Strategy → Technique.</li>
+            <li><strong>Tab 5 — Threats:</strong> tick the threat-actor groups (APT29, FIN7, …) you care about.</li>
+            <li><strong>Tab 6 — Coverage:</strong> see which threats you can detect and where the gaps are. Export a Navigator layer for a heatmap.</li>
+          </ol>
+          <p><strong>This tab specifically:</strong> loads the STIX bundle. Pick a domain (Enterprise is the default), click <em>Load / Refresh</em>. If GitHub is blocked the app auto-falls back to the bundled offline ATT&amp;CK fixture — you'll see a banner explaining the fallback. Optional: upload a local STIX bundle for air-gapped or pinned-version use, or click the <em>Sample mini-bundle</em> link to kick the tires.</p>
+        </div>
+      </details>
       <div class="row">
         <label>Domain
           <select id="domainSelect">
@@ -72,6 +85,23 @@
     <section class="panel" id="tab-inventory" role="tabpanel">
       <h2>2. Log Inventory</h2>
       <p>Score each log source you collect (0 = none, 5 = excellent). Log sources roll up to data components and on through analytics → detection strategies → techniques. Saved to your browser automatically.</p>
+      <details class="tab-help">
+        <summary>📖 How to use this tab</summary>
+        <div class="tab-help-body">
+          <p><strong>What it does:</strong> the single place where you tell the app "here's the telemetry I collect." Every other tab derives its numbers from what you score here.</p>
+          <p><strong>Steps:</strong></p>
+          <ol>
+            <li><em>Group by</em> defaults to <strong>Log source name</strong> (sysmon, windows-security, powershell, …). Switch to <em>Data component</em> if you'd rather see channels grouped by what they detect.</li>
+            <li>Expand a name banner — every event-code channel (e.g. sysmon/1, sysmon/3, sysmon/11) is listed.</li>
+            <li>Set a <strong>0–5 score</strong> on each channel (0 = not collected, 5 = excellent quality / full retention).</li>
+            <li>Use the <strong>enabled</strong> checkbox to <em>park</em> a feed without losing the saved score (useful for "we have this but it's down for maintenance").</li>
+            <li>Use <strong>"+ Add channel under &lt;name&gt;"</strong> to add new event codes inline. If the channel matches a known bundle log source it merges in and immediately drives coverage.</li>
+            <li>Use <strong>"+ Add log source by hand"</strong> (top of tab) for arbitrary tuples — vendor-specific event IDs, Sigma <code>product/category/service</code> strings, or any custom SIEM index.</li>
+            <li><strong>Import a sample inventory</strong> to see realistic numbers fast — four bundled personas (mature enterprise, cloud SaaS, network MSSP, greenfield startup) cover the spectrum.</li>
+          </ol>
+          <p><strong>Capabilities:</strong> import / export YAML or JSON, four bundled persona examples, per-row × remove on custom entries, "Reset" wipes your inventory and clears localStorage.</p>
+        </div>
+      </details>
       <div class="row">
         <input type="search" id="dsFilter" placeholder="Filter data sources&hellip;" />
         <select id="platformFilter">
@@ -136,7 +166,20 @@
 
     <section class="panel" id="tab-components" role="tabpanel">
       <h2>3. Data Components</h2>
-      <p>Flat list of every ATT&amp;CK data component. The score on the right is what you set on the Log Inventory tab. Use this to spot collection gaps quickly.</p>
+      <p>Flat list of every ATT&amp;CK data component. The score on the right is the maximum score across the log sources that feed this component (set on tab 2). Use it to spot collection gaps quickly.</p>
+      <details class="tab-help">
+        <summary>📖 How to use this tab</summary>
+        <div class="tab-help-body">
+          <p><strong>What it does:</strong> read-only roll-up. Every ATT&amp;CK data component (Process Creation, File Modification, Logon Session, …) shows the count of log sources that feed it, the count of analytics that reference it, and the effective score derived from your inventory.</p>
+          <p><strong>Steps:</strong></p>
+          <ol>
+            <li>Score log sources on tab 2 — those scores propagate here automatically.</li>
+            <li>Filter by name / source or by score bucket above the table.</li>
+            <li>Components with score 0 are the immediate collection gaps; bring them up by scoring at least one of the log sources listed in the row meta.</li>
+          </ol>
+          <p><strong>Capabilities:</strong> name + source filter, score-bucket filter, sort by score then source name. The stat cards at the top summarise total / covered / good / uncovered counts plus the bundle's total log sources and analytics.</p>
+        </div>
+      </details>
       <div class="stats" id="componentStats"></div>
       <div class="row">
         <input type="search" id="componentFilter" placeholder="Filter components (name, source)…" />
@@ -153,6 +196,21 @@
     <section class="panel" id="tab-coverage" role="tabpanel">
       <h2>4. Detection strategies</h2>
       <p>Detection strategies (top) bundle one or more analytics, each tied to specific log sources. Lit strategies surface the techniques you can detect (table below).</p>
+      <details class="tab-help">
+        <summary>📖 How to use this tab</summary>
+        <div class="tab-help-body">
+          <p><strong>What it does:</strong> shows every <code>x-mitre-detection-strategy</code> in the loaded bundle and the techniques they unlock. A strategy is "lit" iff at least one of its analytics is lit; an analytic is "lit" iff every required log source has score &gt; 0.</p>
+          <p><strong>Steps:</strong></p>
+          <ol>
+            <li>Read the strategy summary cards at the top — green border = lit, dim = unlit. Each card lists the analytics it bundles, how many log sources are required, and how many techniques it detects.</li>
+            <li>Pick the <strong>Analytic score</strong> aggregator: <em>min</em> = strict (a chain is only as strong as its weakest log source); <em>avg</em> = lenient.</li>
+            <li>Scroll to the technique table — score / coverage ratio / lit/partial badges per technique. Filter by tactic or coverage class.</li>
+            <li>Click <strong>✓</strong> on any technique row to mark it <em>risk accepted</em> (acknowledged gap). It moves out of <em>Uncovered</em> and into the <em>Risk accepted</em> bucket.</li>
+            <li>Use <em>Download detections Navigator layer</em> to export a heatmap.</li>
+          </ol>
+          <p><strong>Capabilities:</strong> tactic + coverage filters, min/avg aggregator toggle, per-technique risk-accept toggle, Navigator layer export.</p>
+        </div>
+      </details>
       <div class="stats" id="coverageStats"></div>
       <details id="strategySummaryDetails" open>
         <summary class="strategy-summary-toggle">Detection strategies in this bundle (<span id="strategySummaryCount">0</span>)</summary>
@@ -185,6 +243,19 @@
     <section class="panel" id="tab-threats" role="tabpanel">
       <h2>5. Threats</h2>
       <p>Pick the MITRE ATT&amp;CK threat-actor groups (e.g. APT29, FIN7) you care about. The next tab compares their techniques against your detection coverage.</p>
+      <details class="tab-help">
+        <summary>📖 How to use this tab</summary>
+        <div class="tab-help-body">
+          <p><strong>What it does:</strong> picks <code>intrusion-set</code> STIX objects (threat-actor groups) so the Coverage tab can cross-reference them against your detections.</p>
+          <p><strong>Steps:</strong></p>
+          <ol>
+            <li>Tick groups in the list, OR import a YAML file of groups (see <em>Samples</em>).</li>
+            <li>Filter the list by name, alias, or ATT&amp;CK ID (e.g. <code>G0016</code>).</li>
+            <li>Move to tab 6 (Coverage) to see what your inventory does and doesn't catch for the picked groups.</li>
+          </ol>
+          <p><strong>Capabilities:</strong> bundled threat-set samples (mixed, ransomware, state APTs, financial), import / export YAML, Clear selection.</p>
+        </div>
+      </details>
       <div class="row">
         <input type="search" id="groupFilter" placeholder="Filter groups (name, alias, ID)&hellip;" />
         <button id="clearGroupSel" class="danger">Clear selection</button>
@@ -206,7 +277,21 @@
 
     <section class="panel" id="tab-gaps" role="tabpanel">
       <h2>6. Coverage</h2>
-      <p>Cross-references the techniques used by the threat groups you picked against your detection strategies. Gaps are techniques those groups use that your data sources can't catch.</p>
+      <p>Cross-references the techniques used by the threat groups you picked against your detection strategies. Gaps are techniques those groups use that your inventory can't catch.</p>
+      <details class="tab-help">
+        <summary>📖 How to use this tab</summary>
+        <div class="tab-help-body">
+          <p><strong>What it does:</strong> turns "what threats do we worry about?" + "what telemetry do we have?" into a prioritised gap list.</p>
+          <p><strong>Steps:</strong></p>
+          <ol>
+            <li>Make sure you've scored an inventory on tab 2 and ticked at least one group on tab 5.</li>
+            <li>Read the stat cards: <em>Threat techniques</em> = total your selected groups use; <em>Covered</em> = you'd detect; <em>Partial</em> = you'd detect some occurrences; <em>Gaps</em> = you can detect in principle but don't; <em>Undetectable</em> = no detections defined in the bundle for it; <em>Risk accepted</em> = you've explicitly acknowledged the gap on tab 4.</li>
+            <li>Filter by status to focus on gaps or partials.</li>
+            <li>Download <em>Threat-groups overlay</em> (score = number of selected groups using each technique) or <em>Gap layer</em> (score = uncovered weight × group count) Navigator layers.</li>
+          </ol>
+          <p><strong>Capabilities:</strong> per-status filtering, two distinct Navigator-layer exports.</p>
+        </div>
+      </details>
       <div class="stats" id="threatStats"></div>
       <div class="row">
         <select id="threatStatusFilter">
@@ -226,6 +311,18 @@
     <section class="panel" id="tab-graph" role="tabpanel">
       <h2>Relationship Diagrams</h2>
       <p>Renders the data flow as Mermaid diagrams. Use them to explain to stakeholders how a log feeds a detection, or to drill into a specific source / technique.</p>
+      <details class="tab-help">
+        <summary>📖 How to use this tab</summary>
+        <div class="tab-help-body">
+          <p><strong>What it does:</strong> visual explainers for the coverage chain. Three sub-sections you can scroll between:</p>
+          <ul>
+            <li><strong>Conceptual model</strong> — abstract diagram of how a raw log becomes a Navigator score. No interaction.</li>
+            <li><strong>Log source utility cascade</strong> — the most useful one. Pick log sources from the multi-select; the diagram renders <em>Log Source → Component → Analytic → Detection Strategy → Technique → Threat Group</em>. Lit (green) nodes are fully covered by your inventory; dim/yellow are blocked because at least one upstream log source is unscored. Use it to communicate <em>why</em> a particular event-code matters.</li>
+            <li><strong>Data source / technique drill-down</strong> — pick a data source or technique to see its components and detections.</li>
+          </ul>
+          <p><strong>Capabilities:</strong> log-source multi-select with filter + "Select all visible", per-technique drill-down, smooth-fade re-renders. Diagrams scroll horizontally on phones.</p>
+        </div>
+      </details>
 
       <h3 class="diagram-h">Conceptual model</h3>
       <p class="diagram-help">How a raw log becomes a detection-ready signal.</p>
@@ -273,6 +370,21 @@
     <section class="panel" id="tab-export" role="tabpanel">
       <h2>Export ATT&amp;CK Navigator layer</h2>
       <p>Customise and download a Navigator layer JSON of your detection coverage. Open it in <a href="https://mitre-attack.github.io/attack-navigator/" target="_blank" rel="noopener">MITRE ATT&amp;CK Navigator</a> via <em>Open Existing Layer &rarr; Upload from local</em>. (Threat-group and gap layers are exported from the Threats and Gap-Analysis tabs.)</p>
+      <details class="tab-help">
+        <summary>📖 How to use this tab</summary>
+        <div class="tab-help-body">
+          <p><strong>What it does:</strong> generates a Navigator layer 4.5 JSON of your detection coverage so you can drop it into the official ATT&amp;CK Navigator for a colored heatmap.</p>
+          <p><strong>Steps:</strong></p>
+          <ol>
+            <li>Score your inventory on tab 2.</li>
+            <li>Customise the layer name, description, and gradient colors above.</li>
+            <li>Toggle <em>Include uncovered techniques</em> if you want every technique in the matrix (vs. just covered ones).</li>
+            <li>Click <em>Download Navigator layer</em> (or <em>Copy JSON</em> for clipboard).</li>
+            <li>In <a href="https://mitre-attack.github.io/attack-navigator/" target="_blank" rel="noopener">Navigator</a>: <em>Open Existing Layer → Upload from local</em>.</li>
+          </ol>
+          <p><strong>Capabilities:</strong> live JSON preview, copy / download, per-technique metadata (covered components, max score, ratio).</p>
+        </div>
+      </details>
       <div class="row">
         <label>Layer name <input type="text" id="layerName" value="Data source coverage" /></label>
         <label>Description <input type="text" id="layerDesc" value="Detection coverage from data source inventory" /></label>
