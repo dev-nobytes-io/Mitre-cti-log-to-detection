@@ -31,6 +31,54 @@ for (const { file, minSelected } of THREAT_SAMPLES) {
   });
 }
 
+test("v2 coverage: importing inventory.example.yaml lights up at least one technique via the strategy chain", async () => {
+  // chunk 4: scoring log sources should flow Log Source -> Analytic ->
+  // Strategy -> Technique. The example inventory scores sysmon/1,
+  // powershell/4104, windows-security/4624 etc. -- each of which is
+  // referenced by an analytic in the offline bundle. At least one
+  // technique should land with weightedScore > 0 and the engine should
+  // report 'v2'.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  await activateTab(page, "inventory");
+  await importInventory(page, "inventory.example.yaml");
+  await activateTab(page, "coverage");
+
+  const result = await page.evaluate(async () => {
+    const [{ computeCoverageV2 }, { effectiveLogSourceScores }, { loadOfflineBundle }] = await Promise.all([
+      import("/js/coverage.js"),
+      import("/js/inventory.js"),
+      import("/js/attack.js"),
+    ]);
+    const attack = await loadOfflineBundle();
+    // Read the same inventory the page just persisted.
+    const raw = localStorage.getItem("attack-inventory-v2");
+    const inv = JSON.parse(raw);
+    const lsScores = effectiveLogSourceScores(inv, attack);
+    const cov = computeCoverageV2(attack, lsScores);
+    const lit = cov.rows.filter(r => r.weightedScore > 0);
+    return {
+      engine: cov.engine,
+      total: cov.summary.total,
+      covered: cov.summary.covered,
+      sample: lit.slice(0, 3).map(r => ({ id: r.attackId, score: r.weightedScore, lit: r.litStrategies, total: r.totalStrategies })),
+    };
+  });
+
+  assert.equal(result.engine, "v2", "expected v2 engine to be active");
+  assert.ok(result.covered > 0, `expected >0 covered techniques via the v2 chain, got ${result.covered}`);
+  assert.ok(result.sample.length > 0, `expected at least one lit technique, got ${JSON.stringify(result)}`);
+
+  // Coverage tab card "Covered" must reflect the v2 result.
+  const coveredCard = await page.evaluate(() => {
+    const card = Array.from(document.querySelectorAll("#coverageStats .stat-card")).find(c => c.querySelector(".label")?.textContent?.includes("Covered"));
+    return Number(card?.querySelector(".value")?.textContent || "0");
+  });
+  assert.ok(coveredCard > 0, `expected Coverage tab Covered card to be > 0, got ${coveredCard}`);
+
+  await page.context().close();
+});
+
 test("gap analysis populates when both inventory and threats are imported", async () => {
   const page = await newPage({ blockExternal: true });
   await bootApp(page);
