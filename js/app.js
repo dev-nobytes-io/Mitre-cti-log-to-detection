@@ -680,6 +680,7 @@ function renderComponents() {
     return;
   }
   const compScores = effectiveComponentScores(state.inventory, state.attack);
+  const lsScores = effectiveLogSourceScores(state.inventory, state.attack);
   const filter = state.filters.component;
   const minScore = state.filters.componentScore;
   const all = state.attack.dataComponents.map(dc => {
@@ -687,6 +688,7 @@ function renderComponents() {
     const score = eff?.score ?? 0;
     return {
       id: dc.id,
+      stixId: dc.id,
       name: dc.name,
       sourceName: state.attack.dataSourceById.get(dc.sourceId)?.name || "?",
       score,
@@ -694,6 +696,8 @@ function renderComponents() {
       techCount: dc.techniqueIds.length,
       logSourceCount: (dc.logSourceIds || []).length,
       analyticCount: (dc.analyticIds || []).length,
+      logSourceIds: dc.logSourceIds || [],
+      analyticIds: dc.analyticIds || [],
     };
   });
   const total = all.length;
@@ -719,19 +723,74 @@ function renderComponents() {
     return true;
   }).sort((a, b) => b.score - a.score || a.sourceName.localeCompare(b.sourceName) || a.name.localeCompare(b.name));
 
-  let html = `<div class="tech-row header"><div>Component</div><div>Data source</div><div>Log sources / Analytics</div><div>Techniques</div><div>Score</div></div>`;
+  // chunk 12: colour-coded rows + expandable details so users can see
+  // which log sources feed each component and which analytics
+  // reference it. Coverage class drives a left-border + soft tint:
+  //   covered (>=3) green, partial (1-2) amber, uncovered grey.
+  let html = `<div class="tech-row header"><div></div><div>Component</div><div>Data source</div><div>Log sources / Analytics</div><div>Techniques</div><div>Score</div></div>`;
   for (const c of rows.slice(0, 1500)) {
+    const coverageCls = c.score >= 3 ? "comp-covered" : (c.score >= 1 ? "comp-partial" : "comp-uncovered");
+    const expanded = state.expanded.has(`comp:${c.id}`);
     html += `
-      <div class="tech-row">
-        <div><strong>${escapeHtml(c.name)}</strong>${c.hasOverride ? ' <span style="color:var(--muted);font-size:11px">(scored)</span>' : ""}</div>
+      <div class="tech-row comp-row ${coverageCls}" data-comp-id="${escapeAttr(c.id)}">
+        <div class="comp-toggle" data-comp-toggle="${escapeAttr(c.id)}" style="cursor:pointer;color:var(--muted)">${expanded ? "▾" : "▸"}</div>
+        <div><strong>${escapeHtml(c.name)}</strong>${c.hasOverride ? ' <span class="cov-tag">scored</span>' : ' <span class="unc-tag">uncovered</span>'}</div>
         <div style="color:var(--muted)">${escapeHtml(c.sourceName)}</div>
         <div style="color:var(--muted);font-size:11px">${c.logSourceCount} log src · ${c.analyticCount} analytic${c.analyticCount === 1 ? "" : "s"}</div>
         <div style="color:var(--muted);font-size:11px">${c.techCount} tech</div>
         <div><span class="score-badge s${c.score}">${c.score}</span></div>
       </div>
+      ${expanded ? renderComponentExpansion(c, lsScores) : ""}
     `;
   }
   root.innerHTML = html;
+
+  // Toggle expansion on click of the chevron OR the row name.
+  root.querySelectorAll("[data-comp-toggle]").forEach(el => {
+    el.addEventListener("click", () => {
+      const id = el.getAttribute("data-comp-toggle");
+      const key = `comp:${id}`;
+      if (state.expanded.has(key)) state.expanded.delete(key);
+      else state.expanded.add(key);
+      renderComponents();
+    });
+  });
+}
+
+// chunk 12: per-component expansion. Lists every log source feeding the
+// component (with score + lit/unlit indicator) and the analytics that
+// reference it. Bridges the gap "I see the component score but I don't
+// know what's actually feeding it."
+function renderComponentExpansion(c, lsScores) {
+  const lsList = c.logSourceIds.map(id => {
+    const ls = state.attack.logSourceById?.get(id);
+    if (!ls) return null;
+    const sc = lsScores.get(id)?.score || 0;
+    return { id, name: ls.name, channel: ls.channel, score: sc };
+  }).filter(Boolean);
+  const ans = c.analyticIds.map(id => state.attack.analyticById?.get(id)).filter(Boolean);
+  const lsHtml = lsList.length === 0
+    ? `<div class="comp-meta">No log sources defined for this component.</div>`
+    : lsList.map(ls => `<div class="comp-ls-row ${ls.score > 0 ? "ls-on" : "ls-off"}">
+        <span class="dot"></span>
+        <strong>${escapeHtml(ls.name)}</strong>
+        <span style="color:var(--muted)">/ ${escapeHtml(ls.channel || "")}</span>
+        <span class="score-badge s${ls.score}">${ls.score}</span>
+      </div>`).join("");
+  const anHtml = ans.length === 0
+    ? `<div class="comp-meta">No analytics in this bundle reference this component.</div>`
+    : ans.map(a => `<div class="comp-an-row">⚙ ${escapeHtml(a.name)}<span style="color:var(--muted);font-size:11px"> · ${a.logSourceIds?.length || 0} log source ref${(a.logSourceIds?.length || 0) === 1 ? "" : "s"}</span></div>`).join("");
+  return `<div class="comp-expansion">
+    <div class="comp-section">
+      <div class="comp-section-h">Log sources feeding ${escapeHtml(c.name)}</div>
+      ${lsHtml}
+      <div class="comp-meta" style="margin-top:6px">Score on the <strong>Log Inventory</strong> tab to bring this component up.</div>
+    </div>
+    <div class="comp-section">
+      <div class="comp-section-h">Analytics referencing this component</div>
+      ${anHtml}
+    </div>
+  </div>`;
 }
 
 function scoreSelect(score, kind, key) {

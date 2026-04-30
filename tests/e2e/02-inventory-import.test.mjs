@@ -120,6 +120,59 @@ test("manual entry: typing a custom log source persists, drives coverage if it m
   await page.context().close();
 });
 
+test("Data Components tab highlights covered rows + expansion lists log sources feeding each component", async () => {
+  // chunk 12: visible bug repro — after importing inventory.example.yaml,
+  // the Components tab must (a) colour-code rows by score (covered/
+  // partial/uncovered border-left tints), (b) tag each row with a
+  // "scored" / "uncovered" pill, (c) expand on chevron click to show
+  // which log sources feed the component and which analytics reference
+  // it.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  await activateTab(page, "inventory");
+  await importInventory(page, "inventory.example.yaml");
+  await activateTab(page, "components");
+  await page.waitForTimeout(150);
+
+  const counts = await page.evaluate(() => ({
+    covered: document.querySelectorAll("#componentTable .tech-row.comp-covered").length,
+    partial: document.querySelectorAll("#componentTable .tech-row.comp-partial").length,
+    uncovered: document.querySelectorAll("#componentTable .tech-row.comp-uncovered").length,
+    scoredTags: document.querySelectorAll("#componentTable .cov-tag").length,
+    uncTags: document.querySelectorAll("#componentTable .unc-tag").length,
+  }));
+  assert.ok(counts.covered + counts.partial >= 5, `expected >=5 visibly-covered/partial component rows after importing the example, got covered=${counts.covered} partial=${counts.partial}`);
+  assert.ok(counts.scoredTags >= 5, `expected >=5 'scored' pills, got ${counts.scoredTags}`);
+
+  // Click the first scored row's chevron — expansion should render
+  // log-source feed list with .ls-on dots when scored.
+  const expanded = await page.evaluate(() => {
+    const toggle = document.querySelector("#componentTable .tech-row.comp-covered .comp-toggle");
+    if (!toggle) return null;
+    toggle.click();
+    return true;
+  });
+  assert.ok(expanded, "expected at least one covered row with a clickable chevron");
+  await page.waitForTimeout(150);
+
+  const expansion = await page.evaluate(() => {
+    const exp = document.querySelector("#componentTable .comp-expansion");
+    if (!exp) return null;
+    return {
+      hasLsRows: exp.querySelectorAll(".comp-ls-row").length,
+      lsOnCount: exp.querySelectorAll(".comp-ls-row.ls-on").length,
+      hasAnRows: exp.querySelectorAll(".comp-an-row").length,
+      sectionHeaders: Array.from(exp.querySelectorAll(".comp-section-h")).map(h => h.textContent),
+    };
+  });
+  assert.ok(expansion, "expansion block should appear after clicking a chevron");
+  assert.ok(expansion.hasLsRows >= 1, `expansion should list >=1 log source, got ${expansion.hasLsRows}`);
+  assert.ok(expansion.lsOnCount >= 1, `at least one log source under a covered component should be lit (.ls-on), got ${expansion.lsOnCount}`);
+  assert.ok(expansion.sectionHeaders.some(h => /Log sources feeding/i.test(h)), `expected 'Log sources feeding' section header, got: ${JSON.stringify(expansion.sectionHeaders)}`);
+
+  await page.context().close();
+});
+
 test("by-name view: groups every channel under its log-source name and the enable toggle parks coverage", async () => {
   // chunk 9: the inventory tab gained a "Group by: log source name /
   // data component" toggle. By-name is the new default. Asserts:
