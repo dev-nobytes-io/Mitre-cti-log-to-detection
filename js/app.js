@@ -140,7 +140,7 @@ $("#stixFile").addEventListener("change", async ev => {
     const text = await file.text();
     const bundle = JSON.parse(text);
     state.attack = loadAttackFromBundle(bundle, { domain: $("#domainSelect").value });
-    onAttackLoaded("file");
+    onAttackLoaded("file", { autoSwitch: true });
   } catch (e) {
     console.error(e);
     setStatus(`Failed to read file: ${e.message}`, "error");
@@ -153,7 +153,7 @@ async function runLoad({ domain, url, force }) {
   setStatus("Loading ATT&CK…", "busy");
   try {
     state.attack = await loadAttack({ domain, url, force, onProgress: p => setStatus(p.message, "busy") });
-    onAttackLoaded(state.attack.meta.source);
+    onAttackLoaded(state.attack.meta.source, { autoSwitch: true });
   } catch (e) {
     console.error("MITRE CTI fetch failed", e);
     setStatus(`MITRE CTI fetch failed: ${e.message}. Falling back to bundled offline ATT&CK.`, "error");
@@ -166,7 +166,7 @@ async function runLoad({ domain, url, force }) {
     );
     try {
       state.attack = await loadOfflineBundle();
-      onAttackLoaded("offline-bundle");
+      onAttackLoaded("offline-bundle", { autoSwitch: true });
     } catch (e2) {
       setStatus(`Both online and offline ATT&CK failed: ${e2.message}`, "error");
       setBanner(`<strong>Couldn't load any ATT&CK data:</strong> ${escapeHtml(e2.message)}`, "error");
@@ -174,7 +174,7 @@ async function runLoad({ domain, url, force }) {
   }
 }
 
-function onAttackLoaded(source) {
+function onAttackLoaded(source, opts = {}) {
   const a = state.attack;
   setStatus(`Loaded ${a.dataSources.length} component categories, ${a.techniques.length} techniques, ${a.groups?.length || 0} groups (${source})`, "ok");
   renderSetupSummary();
@@ -183,10 +183,14 @@ function onAttackLoaded(source) {
   populateGroupSelectors();
   renderCustomLsComponentPicker(); // chunk 13: needs attack data
   refreshAll();
-  // Auto-show inventory tab once data is loaded
-  if ($(".tab.active").dataset.tab === "setup") {
-    $$(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === "inventory"));
-    $$(".panel").forEach(p => p.classList.toggle("active", p.id === "tab-inventory"));
+  // Only jump to the Inventory tab when the user explicitly triggered the
+  // load (Load/Refresh button, STIX upload, sample-assessment CTA). On
+  // boot — cache hit or offline-bundle fallback — the user should land on
+  // the MITRE CTI tab so they can see what was loaded and read the
+  // workflow help. Mobile users in particular were getting dumped into
+  // tab 2 on cold start with no context.
+  if (opts.autoSwitch && $(".tab.active").dataset.tab === "setup") {
+    activateTab("inventory");
   }
 }
 

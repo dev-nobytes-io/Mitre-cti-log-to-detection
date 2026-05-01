@@ -6,6 +6,27 @@ after(async () => { await closeBrowser(); });
 
 const TABS = ["setup", "inventory", "components", "coverage", "threats", "gaps", "graph", "export"];
 
+test("on cold boot the MITRE CTI tab is the active panel (mobile + desktop)", async () => {
+  // chunk N: previously onAttackLoaded auto-switched to the Inventory tab
+  // every time data loaded — including on the cache-hit / offline-fallback
+  // paths that fire on cold start. On mobile that meant the user landed
+  // on tab 2 with no context. The first view should now be the tab the
+  // user clicked / linked to (Setup, the default).
+  for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
+    const page = await newPage({ viewport, blockExternal: true });
+    await bootApp(page);
+    const active = await page.evaluate(() => ({
+      panel: document.querySelector(".panel.active")?.id,
+      desktopTab: document.querySelector(".tab.active")?.dataset?.tab,
+      mobileTab: document.querySelector("#tabsMobile")?.value,
+    }));
+    assert.equal(active.panel, "tab-setup", `(${viewport.width}px) cold boot: expected tab-setup active, got ${active.panel}`);
+    assert.equal(active.desktopTab, "setup", `(${viewport.width}px) desktop tab strip should mark Setup active, got ${active.desktopTab}`);
+    assert.equal(active.mobileTab, "setup", `(${viewport.width}px) mobile dropdown should reflect Setup, got ${active.mobileTab}`);
+    await page.context().close();
+  }
+});
+
 test("at phone width: tabs collapse to a select dropdown, no horizontal overflow", async () => {
   const page = await newPage({ viewport: { width: 390, height: 844 }, blockExternal: true });
   await bootApp(page);

@@ -111,8 +111,11 @@ test("blocked MITRE fetch shows a warn banner and offline data still loads", asy
   // Boot already fell back to offline; verify ATT&CK data is populated
   // and the banner explains what happened.
   const componentCategories = await page.evaluate(() => {
-    const summary = document.querySelector("#setupSummary")?.innerText || "";
-    const m = summary.match(/Component categories\s*(\d+)/);
+    // Use textContent — innerText applies the .label `text-transform:
+    // uppercase` when the setup panel is visible, which would break a
+    // case-sensitive regex.
+    const summary = document.querySelector("#setupSummary")?.textContent || "";
+    const m = summary.match(/Component categories\s*(\d+)/i);
     return m ? Number(m[1]) : 0;
   });
   assert.equal(componentCategories, 38, `expected 38 offline component categories to be loaded, got ${componentCategories}`);
