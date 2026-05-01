@@ -177,6 +177,39 @@ test("manual entry → component map: a custom log source mapped to a component 
   await page.context().close();
 });
 
+test("default-off: a fresh inventory shows zero coverage; personas with scores still light up via implicit-enable (chunk 19)", async () => {
+  // chunk 19: every log source ships disabled by default. Without
+  // a saved inventory entry (or with `enabled: false`), a log source
+  // contributes 0 to coverage even if a v1 data-source projection
+  // would have lifted it. Existing personas + inventory.example.yaml
+  // omit the `enabled:` field but ship `score > 0` rows; the
+  // importer infers enabled = true from score so they continue
+  // working.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  await activateTab(page, "inventory");
+
+  // Reset inventory to baseline.
+  await page.click("#resetInventoryBtn");
+  await page.waitForTimeout(150);
+
+  // Activation strip should be all zeros — no log source enabled.
+  const baseline = await page.evaluate(() => Array.from(document.querySelectorAll("#inventoryActivationStrip .strip-cell strong")).map(s => Number(s.textContent || "0")));
+  assert.equal(baseline[0], 0, `default-off: expected 0 enabled log sources on a fresh inventory, got ${baseline[0]}`);
+  assert.equal(baseline[1], 0, `default-off: expected 0 components activated, got ${baseline[1]}`);
+
+  // Importing the example (which has `score:` but no `enabled:`
+  // fields) should still light things up because the importer infers
+  // enabled from score.
+  await importInventory(page, "inventory.example.yaml");
+  await page.waitForTimeout(150);
+  const after = await page.evaluate(() => Array.from(document.querySelectorAll("#inventoryActivationStrip .strip-cell strong")).map(s => Number(s.textContent || "0")));
+  assert.ok(after[0] >= 5, `expected the imported example to enable >=5 log sources, got ${after[0]}`);
+  assert.ok(after[1] >= 1, `expected at least one component activated by the imported example, got ${after[1]}`);
+
+  await page.context().close();
+});
+
 test("Inventory picker view + activation strip + bulk enable (chunk 18)", async () => {
   // chunk 18: the Log Inventory tab now opens on the picker view by
   // default (flat list, one row per channel, with bulk enable). The
