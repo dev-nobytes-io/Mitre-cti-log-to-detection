@@ -170,6 +170,70 @@ test("manual entry → component map: a custom log source mapped to a component 
   await page.context().close();
 });
 
+test("Inventory picker view + activation strip + bulk enable (chunk 18)", async () => {
+  // chunk 18 (adapted): the picker is opt-in via a 3rd radio
+  // (component-view stays default to preserve the present DC -> LS ->
+  // Channel hierarchy workflow). Activation strip lives above the
+  // table on every grouping and shows the live cascade. Switching to
+  // picker shows the bulk controls + flat-list rows; ticking + scoring
+  // one row should bump the strip's log-sources-enabled and
+  // components-activated cells.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  await activateTab(page, "inventory");
+
+  // Activation strip should be present regardless of grouping.
+  const stripCells = await page.evaluate(() => Array.from(document.querySelectorAll("#inventoryActivationStrip .strip-cell strong")).length);
+  assert.equal(stripCells, 4, `expected 4 activation-strip cells, got ${stripCells}`);
+
+  // Picker controls hidden by default (component view is the default).
+  const pickerHiddenAtBoot = await page.evaluate(() => document.querySelector("#inventoryPickerControls")?.hidden);
+  assert.equal(pickerHiddenAtBoot, true, "picker controls should be hidden when component view is active");
+
+  // Switch to picker via the 3rd radio.
+  await page.click('input[name="inventoryGrouping"][value="picker"]');
+  await page.waitForTimeout(150);
+
+  const pickerVisible = await page.evaluate(() => ({
+    controlsVisible: !document.querySelector("#inventoryPickerControls")?.hidden,
+    pickerRowCount: document.querySelectorAll("#inventoryTable .picker-row").length,
+  }));
+  assert.equal(pickerVisible.controlsVisible, true, "picker controls should appear when picker is selected");
+  assert.ok(pickerVisible.pickerRowCount >= 2, `expected >=2 picker rows (header + 1+ entry), got ${pickerVisible.pickerRowCount}`);
+
+  // Reset inventory so the strip starts at 0 enabled.
+  await page.click("#resetInventoryBtn");
+  await page.waitForTimeout(150);
+
+  // Tick the first picker row to enable it.
+  const targetKey = await page.evaluate(() => {
+    const cb = document.querySelector('#inventoryTable input[data-pick-enable]');
+    if (!cb) return null;
+    cb.checked = true;
+    cb.dispatchEvent(new Event("change", { bubbles: true }));
+    return cb.dataset.pickEnable;
+  });
+  assert.ok(targetKey, "picker should expose at least one enable checkbox");
+  await page.waitForTimeout(150);
+
+  // Score it 5 (the score select only appears once enabled, so re-query).
+  await page.evaluate((key) => {
+    const sel = document.querySelector(`#inventoryTable select[data-kind='ls'][data-key="${key}"]`);
+    if (sel) { sel.value = "5"; sel.dispatchEvent(new Event("change", { bubbles: true })); }
+  }, targetKey);
+  await page.waitForTimeout(150);
+
+  const after = await page.evaluate(() => ({
+    cells: Array.from(document.querySelectorAll("#inventoryActivationStrip .strip-cell strong")).map(s => Number(s.textContent || "0")),
+    pickerCount: document.querySelector("#invPickerCount")?.textContent || "",
+  }));
+  assert.ok(after.cells[0] >= 1, `expected log-sources-enabled to be >=1 after toggle + score, got ${after.cells[0]}`);
+  assert.ok(after.cells[1] >= 1, `expected components-activated to be >=1, got ${after.cells[1]}`);
+  assert.match(after.pickerCount, /\d+ enabled/, `picker count chip should report enabled count, got: ${after.pickerCount}`);
+
+  await page.context().close();
+});
+
 test("default-off: a fresh inventory shows zero coverage; personas with scores still light up via implicit-enable (chunk 19)", async () => {
   // chunk 19: every log source ships disabled by default. Without a
   // saved inventory entry (or with `enabled: false`), a log source
