@@ -384,6 +384,54 @@ test("importing the same file twice via the same input control still works (inpu
   await page.context().close();
 });
 
+test("on cold inventory + cold threats every selectable item is unticked by default", async () => {
+  // chunk N: a fresh user (no imported inventory, no picked threats)
+  // should see every log-source channel as unticked / inactive and
+  // every threat group as unselected. The previous default rendered
+  // bundle log sources with the "enabled" checkbox already ticked,
+  // which contradicted the workflow ("manually select the log
+  // sources you have"). Score is already 0 for every channel; this
+  // test guards the matching enable/checked default.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+
+  // Inventory: open every group so all channel checkboxes are in the DOM.
+  await activateTab(page, "inventory");
+  await page.evaluate(() => {
+    document.querySelectorAll("#inventoryTable [data-toggle]").forEach(t => {
+      const id = t.getAttribute("data-toggle");
+      const wrap = document.querySelector(`[data-components-for="${id}"]`);
+      if (!wrap || !wrap.classList.contains("open")) t.click();
+    });
+  });
+  await page.waitForTimeout(150);
+
+  const inv = await page.evaluate(() => {
+    const enable = Array.from(document.querySelectorAll("#inventoryTable input[type=checkbox][data-ls-enable]"));
+    const score = Array.from(document.querySelectorAll("#inventoryTable select[data-kind='ls']"));
+    return {
+      enableTotal: enable.length,
+      enableChecked: enable.filter(b => b.checked).length,
+      scoreTotal: score.length,
+      scoreNonZero: score.filter(s => Number(s.value) > 0).length,
+    };
+  });
+  assert.ok(inv.enableTotal > 0, `expected at least one enable checkbox after expansion, got ${inv.enableTotal}`);
+  assert.equal(inv.enableChecked, 0, `cold inventory: every channel should default unchecked, got ${inv.enableChecked}/${inv.enableTotal} checked`);
+  assert.equal(inv.scoreNonZero, 0, `cold inventory: every channel score should default 0, got ${inv.scoreNonZero}/${inv.scoreTotal} non-zero`);
+
+  // Threats: every group checkbox should default unchecked.
+  await activateTab(page, "threats");
+  const thr = await page.evaluate(() => {
+    const boxes = Array.from(document.querySelectorAll("#groupList input[type=checkbox][data-gid]"));
+    return { total: boxes.length, checked: boxes.filter(b => b.checked).length };
+  });
+  assert.ok(thr.total > 0, `expected at least one group checkbox, got ${thr.total}`);
+  assert.equal(thr.checked, 0, `cold threats: every group should default unselected, got ${thr.checked}/${thr.total} selected`);
+
+  await page.context().close();
+});
+
 test("inventory tab is fast on cold load: collapsed groups don't render channel rows", async () => {
   // chunk N: previously every group's <ds-components> wrapper rendered
   // every channel row + score select + add-channel form into the DOM,
