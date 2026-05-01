@@ -95,11 +95,10 @@
           <p><strong>What it does:</strong> the single place where you tell the app "here's the telemetry I collect." Every other tab derives its numbers from what you score here.</p>
           <p><strong>Steps:</strong></p>
           <ol>
-            <li><em>Group by</em> defaults to <strong>Log source name</strong> (sysmon, windows-security, powershell, …). Switch to <em>Data component</em> if you'd rather see channels grouped by what they detect.</li>
-            <li>Expand a name banner — every event-code channel (e.g. sysmon/1, sysmon/3, sysmon/11) is listed.</li>
-            <li>Set a <strong>0–5 score</strong> on each channel (0 = not collected, 5 = excellent quality / full retention).</li>
-            <li>Use the <strong>enabled</strong> checkbox to <em>park</em> a feed without losing the saved score (useful for "we have this but it's down for maintenance").</li>
-            <li>Use <strong>"+ Add channel under &lt;name&gt;"</strong> to add new event codes inline. If the channel matches a known bundle log source it merges in and immediately drives coverage.</li>
+            <li><strong>Watch the activation strip</strong> at the top of the panel — it shows the live cascade <em>log sources enabled → components activated → strategies lit → techniques covered</em>. Every change you make updates the numbers immediately.</li>
+            <li><em>Group by</em> defaults to <strong>Data component</strong> (the merged DC → Log Source → Channel hierarchy). Switch to <em>Log source name</em> to expand by tool, or <em>Picker (flat list)</em> for one scrollable list with bulk Enable-all-visible / Disable-all-visible buttons.</li>
+            <li>Tick a channel to <strong>enable</strong> it, then set a <strong>0–5 score</strong> (0 = not collected, 5 = excellent quality / full retention). Untick to <em>park</em> the feed without losing the saved score.</li>
+            <li>Use <strong>"+ Add channel under &lt;name&gt;"</strong> in the by-name view to add new event codes inline. If the channel matches a known bundle log source it merges in and immediately drives coverage.</li>
             <li>Use <strong>"+ Add log source by hand"</strong> (top of tab) for arbitrary tuples — vendor-specific event IDs, Sigma <code>product/category/service</code> strings, or any custom SIEM index.</li>
             <li><strong>Import a sample inventory</strong> to see realistic numbers fast — four bundled personas (mature enterprise, cloud SaaS, network MSSP, greenfield startup) cover the spectrum.</li>
           </ol>
@@ -142,8 +141,16 @@
           Group by:
           <label><input type="radio" name="inventoryGrouping" value="component" checked /> Data component</label>
           <label><input type="radio" name="inventoryGrouping" value="name" /> Log source name</label>
+          <label><input type="radio" name="inventoryGrouping" value="picker" /> Picker (flat list)</label>
         </span>
         <button id="resetInventoryBtn" class="danger">Reset</button>
+      </div>
+      <div id="inventoryActivationStrip" class="activation-strip"></div>
+      <div id="inventoryPickerControls" class="row picker-controls" hidden>
+        <input type="search" id="invPickerFilter" placeholder="Filter log sources (name or channel)…" />
+        <button id="invPickerSelectVisible">Enable all visible</button>
+        <button id="invPickerClearVisible" class="danger">Disable all visible</button>
+        <span id="invPickerCount" class="muted-pill">0 enabled</span>
       </div>
       <details id="customLsForm" class="custom-ls-form">
         <summary>+ Add log source by hand (event ID / channel / SIEM-specific)</summary>
