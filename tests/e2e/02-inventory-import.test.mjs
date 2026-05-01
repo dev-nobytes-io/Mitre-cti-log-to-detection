@@ -243,10 +243,13 @@ test("by-name view: groups every channel under its log-source name and the enabl
   const grouping = await page.evaluate(() => document.querySelector('input[name="inventoryGrouping"][value="name"]')?.checked);
   assert.equal(grouping, true, "default grouping should be 'name'");
 
-  // Expand the sysmon banner.
+  // Ensure the sysmon banner is expanded. Auto-expand may have already
+  // opened it (chunk N) — clicking toggles, so only click when needed.
   await page.evaluate(() => {
-    const t = document.querySelector('[data-toggle="name:sysmon"]');
-    if (t) t.click();
+    const wrap = document.querySelector('[data-components-for="name:sysmon"]');
+    if (!wrap || !wrap.classList.contains("open")) {
+      document.querySelector('[data-toggle="name:sysmon"]')?.click();
+    }
   });
   await page.waitForTimeout(150);
 
@@ -344,9 +347,16 @@ test("v2: importing inventory.example.yaml exposes scored log_sources block", as
   const [lsN] = lsScored.split("/").map(s => Number(s.trim()));
   assert.ok(lsN >= 5, `expected >=5 explicitly-scored log sources, got ${lsN}`);
 
-  // Expand every parent so the nested log-source selects are in the DOM.
+  // Ensure every parent is expanded so the nested log-source selects
+  // are in the DOM. Auto-expand (chunk N) may have already opened the
+  // groups that contain scored rows, so click only the still-collapsed
+  // ones — clicking again would re-collapse them.
   await page.evaluate(() => {
-    document.querySelectorAll("#inventoryTable [data-toggle]").forEach(el => el.click());
+    document.querySelectorAll("#inventoryTable [data-toggle]").forEach(t => {
+      const id = t.getAttribute("data-toggle");
+      const wrap = document.querySelector(`[data-components-for="${id}"]`);
+      if (!wrap || !wrap.classList.contains("open")) t.click();
+    });
   });
   await page.waitForTimeout(150);
 
@@ -370,6 +380,82 @@ test("importing the same file twice via the same input control still works (inpu
   await importInventory(page, "persona-cloud-saas.yaml");
   let secondStatus = await page.locator("#statusText").innerText();
   assert.match(secondStatus, /Imported/, `re-import should also report success, got: ${secondStatus}`);
+
+  await page.context().close();
+});
+
+test("inventory tab is fast on cold load: collapsed groups don't render channel rows", async () => {
+  // chunk N: previously every group's <ds-components> wrapper rendered
+  // every channel row + score select + add-channel form into the DOM,
+  // hidden via display:none until expansion. With hundreds of bundle
+  // log sources this used to crash the page. Now the inner rows are
+  // emitted only when a group is expanded, and the bootstrap renders
+  // header-only nodes for groups with no scored entries.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  await activateTab(page, "inventory");
+  // No inventory imported: every group is unscored, so auto-expand
+  // shouldn't fire, and no group should have an open .ds-components
+  // (i.e. no score selects, no add-channel forms in the DOM).
+  const cold = await page.evaluate(() => ({
+    groups: document.querySelectorAll("#inventoryTable .ds-row[data-ds-id]").length,
+    openSections: document.querySelectorAll("#inventoryTable .ds-components.open").length,
+    selects: document.querySelectorAll("#inventoryTable select[data-kind='ls']").length,
+    addForms: document.querySelectorAll("#inventoryTable form.add-channel-form").length,
+  }));
+  assert.ok(cold.groups > 0, `expected at least one group header on cold load, got ${cold.groups}`);
+  assert.equal(cold.openSections, 0, `cold inventory should render zero open .ds-components, got ${cold.openSections}`);
+  assert.equal(cold.selects, 0, `cold inventory should render zero score selects, got ${cold.selects}`);
+  assert.equal(cold.addForms, 0, `cold inventory should render zero add-channel forms, got ${cold.addForms}`);
+
+  // Clicking a group's toggle expands it lazily — the inner channel
+  // rows + form appear on demand.
+  const firstId = await page.evaluate(() => document.querySelector("#inventoryTable [data-toggle]")?.getAttribute("data-toggle"));
+  assert.ok(firstId, "expected at least one toggle button");
+  await page.evaluate(id => document.querySelector(`[data-toggle="${id}"]`).click(), firstId);
+  await page.waitForTimeout(120);
+  const afterToggle = await page.evaluate(id => ({
+    open: document.querySelectorAll("#inventoryTable .ds-components.open").length,
+    formsForGroup: document.querySelectorAll(`[data-components-for="${id}"] form.add-channel-form`).length,
+  }), firstId);
+  assert.equal(afterToggle.open, 1, `expanding one group should produce exactly one open section, got ${afterToggle.open}`);
+  assert.ok(afterToggle.formsForGroup >= 1, `expanded group should emit its add-channel form, got ${afterToggle.formsForGroup}`);
+
+  await page.context().close();
+});
+
+test("inventory text filter narrows visible groups and forces matches open", async () => {
+  // chunk N: the by-name view now actually applies state.filters.ds. A
+  // search term hides non-matching groups entirely (so 100s of unrelated
+  // log-source banners aren't rebuilt on every keystroke) and forces
+  // matching groups to render expanded so the user sees their hits.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  await activateTab(page, "inventory");
+
+  // Snapshot the unfiltered group count.
+  const baseline = await page.evaluate(() => document.querySelectorAll("#inventoryTable .ds-row[data-ds-id]").length);
+  assert.ok(baseline > 1, `expected >1 group on cold inventory, got ${baseline}`);
+
+  // Type a narrow filter; the input is debounced (~180ms) so wait it out.
+  await page.fill("#dsFilter", "sysmon");
+  await page.waitForTimeout(350);
+
+  const filtered = await page.evaluate(() => {
+    const groups = Array.from(document.querySelectorAll("#inventoryTable .ds-row[data-ds-id] .ds-name")).map(n => n.textContent.trim().toLowerCase());
+    const open = document.querySelectorAll("#inventoryTable .ds-components.open").length;
+    return { groups, open };
+  });
+  assert.ok(filtered.groups.length >= 1, `expected at least one group matching 'sysmon', got: ${JSON.stringify(filtered.groups)}`);
+  assert.ok(filtered.groups.length < baseline, `filter should hide non-matching groups (baseline ${baseline}, after ${filtered.groups.length})`);
+  assert.ok(filtered.groups.every(n => n.includes("sysmon")), `every visible group should match 'sysmon', got: ${JSON.stringify(filtered.groups)}`);
+  assert.ok(filtered.open >= 1, `matching groups should render expanded under an active filter, got ${filtered.open} open sections`);
+
+  // Clearing the filter restores the full set without crashing.
+  await page.fill("#dsFilter", "");
+  await page.waitForTimeout(350);
+  const restored = await page.evaluate(() => document.querySelectorAll("#inventoryTable .ds-row[data-ds-id]").length);
+  assert.equal(restored, baseline, `clearing the filter should restore all ${baseline} groups, got ${restored}`);
 
   await page.context().close();
 });
