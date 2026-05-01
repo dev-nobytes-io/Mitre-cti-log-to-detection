@@ -89,14 +89,12 @@ test("manual entry: typing a custom log source persists, drives coverage if it m
   await page.click("#customLsAdd");
   await page.waitForTimeout(150);
 
-  // The custom entry should land in the "winlogbeat" group with a (custom) marker.
-  // Expand the group first.
-  await page.evaluate(() => document.querySelector('[data-toggle="name:winlogbeat"]')?.click());
-  await page.waitForTimeout(150);
-
+  // The custom entry should land in the dedicated "Custom log sources"
+  // block at the top of the by-component view (chunk N restructured the
+  // inventory tab to a Data Component → Log Source → Channel hierarchy;
+  // custom tuples have no parent component so they get their own block).
   const customRow = await page.evaluate(() => {
-    const wrap = document.querySelector('[data-components-for="name:winlogbeat"]');
-    const row = wrap?.querySelector(".dc-row.by-name-row");
+    const row = document.querySelector('.dc-row.custom-ls-row[data-custom-key="winlogbeat||9999"]');
     if (!row) return null;
     return {
       score: Number(row.querySelector("select[data-kind='ls']")?.value || "0"),
@@ -105,7 +103,7 @@ test("manual entry: typing a custom log source persists, drives coverage if it m
       comment: row.textContent || "",
     };
   });
-  assert.ok(customRow, "custom row should render in the winlogbeat group");
+  assert.ok(customRow, "custom row should render in the Custom log sources block");
   assert.equal(customRow.score, 4);
   assert.ok(customRow.hasRemove, "custom row should expose a × remove button");
   assert.ok(customRow.isCustom, "row should be marked (custom) since the bundle doesn't know winlogbeat/9999");
@@ -114,8 +112,8 @@ test("manual entry: typing a custom log source persists, drives coverage if it m
   // Remove the custom entry.
   await page.click('[data-remove-custom="winlogbeat||9999"]');
   await page.waitForTimeout(150);
-  const stillThere = await page.evaluate(() => !!document.querySelector('[data-toggle="name:winlogbeat"]'));
-  assert.equal(stillThere, false, "winlogbeat group should disappear after the only entry is removed");
+  const stillThere = await page.evaluate(() => !!document.querySelector('.dc-row.custom-ls-row[data-custom-key="winlogbeat||9999"]'));
+  assert.equal(stillThere, false, "custom row should disappear after × remove");
 
   await page.context().close();
 });
@@ -226,8 +224,10 @@ test("Data Components tab highlights covered rows + expansion lists log sources 
 });
 
 test("by-name view: groups every channel under its log-source name and the enable toggle parks coverage", async () => {
-  // chunk 9: the inventory tab gained a "Group by: log source name /
-  // data component" toggle. By-name is the new default. Asserts:
+  // chunk 9: the inventory tab has a "Group by" toggle. By-component is
+  // the default (chunk N) but by-name remains as an alternate view that
+  // surfaces every channel of one tool side-by-side. Switch to it
+  // explicitly here so this test exercises that mode.
   //   - importing the example inventory groups all sysmon/* channels
   //     under one expandable banner,
   //   - the banner footer shows "+ Add channel under sysmon",
@@ -239,9 +239,14 @@ test("by-name view: groups every channel under its log-source name and the enabl
   await importInventory(page, "inventory.example.yaml");
   await page.waitForTimeout(150);
 
-  // Confirm by-name is the default mode.
+  // Switch to the by-name view.
+  await page.evaluate(() => {
+    const r = document.querySelector('input[name="inventoryGrouping"][value="name"]');
+    if (r) { r.checked = true; r.dispatchEvent(new Event("change", { bubbles: true })); }
+  });
+  await page.waitForTimeout(150);
   const grouping = await page.evaluate(() => document.querySelector('input[name="inventoryGrouping"][value="name"]')?.checked);
-  assert.equal(grouping, true, "default grouping should be 'name'");
+  assert.equal(grouping, true, "by-name radio should be checked after switching");
 
   // Ensure the sysmon banner is expanded. Auto-expand may have already
   // opened it (chunk N) — clicking toggles, so only click when needed.
@@ -293,6 +298,14 @@ test("by-name view: + Add channel inline form scores a new event code under the 
   const page = await newPage({ blockExternal: true });
   await bootApp(page);
   await activateTab(page, "inventory");
+
+  // Switch to the by-name view (chunk N made by-component the default;
+  // the per-name "+ Add channel" form lives in by-name only).
+  await page.evaluate(() => {
+    const r = document.querySelector('input[name="inventoryGrouping"][value="name"]');
+    if (r) { r.checked = true; r.dispatchEvent(new Event("change", { bubbles: true })); }
+  });
+  await page.waitForTimeout(150);
 
   // Expand the sysmon group (will be empty of saved entries on a fresh load).
   await page.evaluate(() => document.querySelector('[data-toggle="name:sysmon"]')?.click());
@@ -384,6 +397,79 @@ test("importing the same file twice via the same input control still works (inpu
   await page.context().close();
 });
 
+test("by-component view (default): renders Data Component → Log Source → Channel hierarchy with channels unticked", async () => {
+  // chunk N: the inventory tab merges the log-source and data-component
+  // objects under one DC → LS → Channel hierarchy. By-component is the
+  // default. Pick one component (e.g. "Process Creation"), expand it,
+  // and assert there's at least one log-source sub-group with at least
+  // one channel row, and that nothing is ticked on a cold inventory.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  await activateTab(page, "inventory");
+
+  // The default radio should be by-component.
+  const grouping = await page.evaluate(() =>
+    document.querySelector('input[name="inventoryGrouping"][value="component"]')?.checked);
+  assert.equal(grouping, true, "by-component should be the default grouping");
+
+  // Find a component group containing the term 'Process' (offline bundle
+  // ships several — Process Creation, Process Termination, etc.).
+  const dcId = await page.evaluate(() => {
+    for (const r of document.querySelectorAll("#inventoryTable .ds-row[data-ds-id]")) {
+      const name = r.querySelector(".ds-name")?.textContent || "";
+      if (/process/i.test(name)) return r.getAttribute("data-ds-id");
+    }
+    return null;
+  });
+  assert.ok(dcId, "expected a 'Process'-something component group on cold load");
+
+  // Expand it and inspect the structure.
+  await page.evaluate(id => document.querySelector(`[data-toggle="${id}"]`)?.click(), dcId);
+  await page.waitForTimeout(150);
+
+  const detail = await page.evaluate(id => {
+    const wrap = document.querySelector(`[data-components-for="${id}"]`);
+    if (!wrap) return null;
+    const subs = wrap.querySelectorAll(".ls-subgroup");
+    const channels = wrap.querySelectorAll(".dc-row.by-name-row");
+    const enables = Array.from(wrap.querySelectorAll("input[type=checkbox][data-ls-enable]"));
+    const scores = Array.from(wrap.querySelectorAll("select[data-kind='ls']"));
+    return {
+      subgroups: subs.length,
+      channels: channels.length,
+      enableCount: enables.length,
+      enableChecked: enables.filter(b => b.checked).length,
+      scoreNonZero: scores.filter(s => Number(s.value) > 0).length,
+    };
+  }, dcId);
+  assert.ok(detail, "expected an open ds-components wrapper for the chosen component");
+  assert.ok(detail.subgroups >= 1, `expected >=1 .ls-subgroup under the component, got ${detail.subgroups}`);
+  assert.ok(detail.channels >= 1, `expected >=1 channel row, got ${detail.channels}`);
+  assert.equal(detail.enableChecked, 0, `every channel should default unticked, got ${detail.enableChecked}/${detail.enableCount}`);
+  assert.equal(detail.scoreNonZero, 0, `every channel score should default 0, got ${detail.scoreNonZero}`);
+
+  // Tick one channel — the row should pick up the active styling and
+  // the inventorySummary "log sources scored" pill should not move
+  // (score is still 0; only the active flag changed).
+  const firstKey = await page.evaluate(id => {
+    const cb = document.querySelector(`[data-components-for="${id}"] input[type=checkbox][data-ls-enable]`);
+    if (!cb) return null;
+    cb.checked = true;
+    cb.dispatchEvent(new Event("change", { bubbles: true }));
+    return cb.getAttribute("data-ls-enable");
+  }, dcId);
+  assert.ok(firstKey, "expected an enable checkbox to tick");
+  await page.waitForTimeout(150);
+  const afterTick = await page.evaluate(k => {
+    const cb = document.querySelector(`input[type=checkbox][data-ls-enable="${k}"]`);
+    return { checked: !!cb?.checked, parked: cb?.closest(".dc-row.by-name-row")?.classList.contains("parked") };
+  }, firstKey);
+  assert.equal(afterTick.checked, true, "ticked checkbox should remain checked after re-render");
+  assert.equal(afterTick.parked, false, "active row should not have .parked styling");
+
+  await page.context().close();
+});
+
 test("on cold inventory + cold threats every selectable item is unticked by default", async () => {
   // chunk N: a fresh user (no imported inventory, no picked threats)
   // should see every log-source channel as unticked / inactive and
@@ -434,49 +520,46 @@ test("on cold inventory + cold threats every selectable item is unticked by defa
 
 test("inventory tab is fast on cold load: collapsed groups don't render channel rows", async () => {
   // chunk N: previously every group's <ds-components> wrapper rendered
-  // every channel row + score select + add-channel form into the DOM,
-  // hidden via display:none until expansion. With hundreds of bundle
-  // log sources this used to crash the page. Now the inner rows are
-  // emitted only when a group is expanded, and the bootstrap renders
-  // header-only nodes for groups with no scored entries.
+  // every channel row + score select into the DOM, hidden via
+  // display:none until expansion. With hundreds of bundle log sources
+  // this used to crash the page. Inner rows are now emitted only when
+  // a group is expanded, and the cold view (no inventory) emits header-
+  // only nodes for every group.
   const page = await newPage({ blockExternal: true });
   await bootApp(page);
   await activateTab(page, "inventory");
-  // No inventory imported: every group is unscored, so auto-expand
-  // shouldn't fire, and no group should have an open .ds-components
-  // (i.e. no score selects, no add-channel forms in the DOM).
   const cold = await page.evaluate(() => ({
     groups: document.querySelectorAll("#inventoryTable .ds-row[data-ds-id]").length,
     openSections: document.querySelectorAll("#inventoryTable .ds-components.open").length,
     selects: document.querySelectorAll("#inventoryTable select[data-kind='ls']").length,
-    addForms: document.querySelectorAll("#inventoryTable form.add-channel-form").length,
   }));
   assert.ok(cold.groups > 0, `expected at least one group header on cold load, got ${cold.groups}`);
   assert.equal(cold.openSections, 0, `cold inventory should render zero open .ds-components, got ${cold.openSections}`);
   assert.equal(cold.selects, 0, `cold inventory should render zero score selects, got ${cold.selects}`);
-  assert.equal(cold.addForms, 0, `cold inventory should render zero add-channel forms, got ${cold.addForms}`);
 
   // Clicking a group's toggle expands it lazily — the inner channel
-  // rows + form appear on demand.
+  // rows appear on demand.
   const firstId = await page.evaluate(() => document.querySelector("#inventoryTable [data-toggle]")?.getAttribute("data-toggle"));
   assert.ok(firstId, "expected at least one toggle button");
   await page.evaluate(id => document.querySelector(`[data-toggle="${id}"]`).click(), firstId);
   await page.waitForTimeout(120);
   const afterToggle = await page.evaluate(id => ({
     open: document.querySelectorAll("#inventoryTable .ds-components.open").length,
-    formsForGroup: document.querySelectorAll(`[data-components-for="${id}"] form.add-channel-form`).length,
+    rowsForGroup: document.querySelectorAll(`[data-components-for="${id}"] .dc-row.by-name-row`).length,
   }), firstId);
   assert.equal(afterToggle.open, 1, `expanding one group should produce exactly one open section, got ${afterToggle.open}`);
-  assert.ok(afterToggle.formsForGroup >= 1, `expanded group should emit its add-channel form, got ${afterToggle.formsForGroup}`);
+  assert.ok(afterToggle.rowsForGroup >= 1, `expanded group should emit at least one channel row, got ${afterToggle.rowsForGroup}`);
 
   await page.context().close();
 });
 
 test("inventory text filter narrows visible groups and forces matches open", async () => {
-  // chunk N: the by-name view now actually applies state.filters.ds. A
-  // search term hides non-matching groups entirely (so 100s of unrelated
-  // log-source banners aren't rebuilt on every keystroke) and forces
-  // matching groups to render expanded so the user sees their hits.
+  // chunk N: the inventory view applies state.filters.ds across the
+  // hierarchy. A search term hides non-matching groups entirely (so
+  // 100s of unrelated banners aren't rebuilt on every keystroke) and
+  // forces matching groups to render expanded so the user sees their
+  // hits. The by-component view (default) matches the search against
+  // log-source names + channels + the parent component name.
   const page = await newPage({ blockExternal: true });
   await bootApp(page);
   await activateTab(page, "inventory");
@@ -490,13 +573,20 @@ test("inventory text filter narrows visible groups and forces matches open", asy
   await page.waitForTimeout(350);
 
   const filtered = await page.evaluate(() => {
-    const groups = Array.from(document.querySelectorAll("#inventoryTable .ds-row[data-ds-id] .ds-name")).map(n => n.textContent.trim().toLowerCase());
+    const groups = Array.from(document.querySelectorAll("#inventoryTable .ds-row[data-ds-id]"));
     const open = document.querySelectorAll("#inventoryTable .ds-components.open").length;
-    return { groups, open };
+    // Visible groups must each contain at least one row referencing the
+    // filter term (channel name or parent log-source name).
+    const sysmonHits = groups.filter(g => {
+      const id = g.getAttribute("data-ds-id");
+      const wrap = document.querySelector(`[data-components-for="${id}"]`);
+      return /sysmon/i.test(wrap?.textContent || "");
+    }).length;
+    return { groupCount: groups.length, sysmonHits, open };
   });
-  assert.ok(filtered.groups.length >= 1, `expected at least one group matching 'sysmon', got: ${JSON.stringify(filtered.groups)}`);
-  assert.ok(filtered.groups.length < baseline, `filter should hide non-matching groups (baseline ${baseline}, after ${filtered.groups.length})`);
-  assert.ok(filtered.groups.every(n => n.includes("sysmon")), `every visible group should match 'sysmon', got: ${JSON.stringify(filtered.groups)}`);
+  assert.ok(filtered.groupCount >= 1, `expected at least one group matching 'sysmon', got ${filtered.groupCount}`);
+  assert.ok(filtered.groupCount < baseline, `filter should hide non-matching groups (baseline ${baseline}, after ${filtered.groupCount})`);
+  assert.equal(filtered.groupCount, filtered.sysmonHits, `every visible group should contain a sysmon row, got ${filtered.sysmonHits}/${filtered.groupCount}`);
   assert.ok(filtered.open >= 1, `matching groups should render expanded under an active filter, got ${filtered.open} open sections`);
 
   // Clearing the filter restores the full set without crashing.

@@ -592,6 +592,11 @@ button.danger { color: var(--bad); border-color: var(--bad); }
 }
 .grouping-toggle input[type="radio"] { margin: 0; }
 
+/* chunk N: Data Component → Log Source → Channel sub-group block */
+.ls-subgroup { padding: 4px 0 6px 12px; border-left: 2px solid var(--border); margin: 4px 0 8px; }
+.ls-subgroup-h { display: flex; align-items: baseline; gap: 8px; padding: 4px 0 6px; }
+.ls-subgroup-h strong { font-size: 13px; }
+
 /* chunk 9: by-name view rows + add-channel form */
 .dc-row.by-name-row { display: grid; grid-template-columns: minmax(0, 1fr) 110px 130px auto; align-items: center; gap: 6px 12px; }
 .dc-row.by-name-row.parked { opacity: 0.55; }

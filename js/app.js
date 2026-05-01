@@ -35,7 +35,7 @@ const state = {
     group: "",
     threatStatus: "",
     analyticAggregation: "min", // how to aggregate log-source scores into an analytic score (V2 chain)
-    inventoryGrouping: "name", // chunk 9: 'name' (group by log-source name) or 'component' (legacy by-data-component view)
+    inventoryGrouping: "component", // chunk N: 'component' is the merged Data Component → Log Source → Channel hierarchy (default); 'name' groups every channel under its log-source name (alternate view)
     customLsCompFilter: "", // chunk 13: filter for the component picker on the manual-entry form
   },
   // chunk 13: which data components the user has selected for the
@@ -446,36 +446,39 @@ function renderInventory() {
     `;
   }
 
-  if (state.filters.inventoryGrouping === "component") {
-    return renderLogSourceInventory(root, compScores, lsScores);
+  if (state.filters.inventoryGrouping === "name") {
+    return renderInventoryByName(root, lsScores);
   }
-  return renderInventoryByName(root, lsScores);
+  return renderInventoryByComponent(root, lsScores);
 }
 
-// v2 Log-Source inventory view (default). Renders log sources grouped by
-// their parent data component; each row has a 0-5 score select that flows
-// into inv.log_sources[]. Components inherit the max log-source score
-// (computed by effectiveComponentScores).
-function renderLogSourceInventory(root, compScores, lsScores) {
-  const filterText = state.filters.ds;
-  const filterPlatform = state.filters.platform;
+// chunk N: merged Data-Component → Log-Source → Channel hierarchy. Each
+// data component (Process Creation, File Modification, Logon Session
+// Creation, ...) groups the log-source names that feed it; each name
+// expands to the (name, channel) tuples the bundle declares for that
+// component. Each leaf has a single tick (active/inactive) and the
+// 0-5 quality score. Default unticked everywhere — the user opts in by
+// ticking the channels they actually collect.
+//
+// A single tuple (e.g. sysmon/1) can feed multiple data components and
+// will appear once under each. The backing inventory entry is the same
+// (keyed by lsKey), so ticking once activates it everywhere on the
+// next refresh; each row exposes a "feeds N other components" hint.
+function renderInventoryByComponent(root, lsScores) {
   const onlyScored = !!state.filters.onlyScored;
+  const filterText = (state.filters.ds || "").trim();
+  const filterPlatform = state.filters.platform || "";
 
-  const sources = state.attack.dataSources.filter(ds => {
-    if (filterText && !(ds.name.toLowerCase().includes(filterText) || ds.attackId?.toLowerCase().includes(filterText))) return false;
-    if (filterPlatform && !ds.platforms.includes(filterPlatform)) return false;
-    if (onlyScored) {
-      const anyLs = ds.components.some(c => (c.logSourceIds || []).some(id => (lsScores.get(id)?.score || 0) > 0));
-      if (!anyLs) return false;
-    }
-    return true;
-  });
+  // O(1) lookup for inventory entries.
+  const invByKey = new Map();
+  for (const e of state.inventory.log_sources || []) {
+    invByKey.set(((e.name || "") + "|" + (e.channel || "")).toLowerCase(), e);
+  }
 
-  // Custom log sources: entries the user added by hand whose
-  // (name, channel) doesn't match any log source in the loaded bundle.
-  // Shown in their own collapsible block at the top of the list so the
-  // user can see / edit / remove them; they don't drive coverage but
-  // round-trip in YAML/JSON exports.
+  // Custom (name, channel) entries that don't appear in any bundle
+  // component get their own block at the top so users can still
+  // edit / remove them. They don't fit the DC -> LS -> Channel tree
+  // because they have no parent component.
   const knownKeys = new Set();
   for (const ls of state.attack.logSources || []) {
     knownKeys.add(((ls.name || "") + "|" + (ls.channel || "")).toLowerCase());
@@ -485,7 +488,57 @@ function renderLogSourceInventory(root, compScores, lsScores) {
     return !knownKeys.has(k);
   });
 
+  // Build the hierarchy: componentId -> { dc, sourceName, lsByName,
+  // totalChannels, scoredChannels }.
+  const hierarchy = new Map();
+  for (const dc of state.attack.dataComponents || []) {
+    const lsByName = new Map();
+    let totalChannels = 0, scoredChannels = 0;
+    for (const lsId of dc.logSourceIds || []) {
+      const ls = state.attack.logSourceById?.get(lsId);
+      if (!ls) continue;
+      const key = ((ls.name || "") + "|" + (ls.channel || "")).toLowerCase();
+      const entry = invByKey.get(key);
+      const score = entry && entry.score !== undefined ? clampInt(entry.score) : 0;
+      const enabled = !!entry && entry.enabled !== false;
+      if (filterText) {
+        const hay = `${ls.name || ""} ${ls.channel || ""} ${dc.name || ""} ${entry?.comment || ""}`.toLowerCase();
+        if (!hay.includes(filterText)) continue;
+      }
+      if (filterPlatform && !(ls.platforms || []).includes(filterPlatform)) continue;
+      const nameKey = ls.name || "(unnamed)";
+      if (!lsByName.has(nameKey)) lsByName.set(nameKey, { rows: [], scored: 0, total: 0 });
+      const grp = lsByName.get(nameKey);
+      grp.rows.push({ ls, entry, score, enabled });
+      grp.total += 1;
+      totalChannels += 1;
+      if (enabled && score > 0) { grp.scored += 1; scoredChannels += 1; }
+    }
+    if (lsByName.size === 0) continue;
+    if (onlyScored && scoredChannels === 0) continue;
+    hierarchy.set(dc.id, {
+      dc,
+      sourceName: state.attack.dataSourceById.get(dc.sourceId)?.name || "?",
+      lsByName,
+      totalChannels,
+      scoredChannels,
+    });
+  }
+
+  // One-shot auto-expand of components with at least one active channel
+  // (mirrors the by-name view; same flag so switching modes is sane).
+  if (!state.inventoryAutoExpandDone) {
+    let any = false;
+    for (const [dcId, h] of hierarchy) {
+      if (h.scoredChannels > 0) { state.expanded.add(`comp:${dcId}`); any = true; }
+    }
+    if (any || (state.inventory.log_sources || []).length > 0) {
+      state.inventoryAutoExpandDone = true;
+    }
+  }
+
   let html = "";
+
   if (customEntries.length > 0) {
     html += `<div class="ds-row" style="background:var(--surface-2,#fafafa);font-weight:600">
       <div></div>
@@ -495,72 +548,89 @@ function renderLogSourceInventory(root, compScores, lsScores) {
     </div>`;
     for (const e of customEntries) {
       const score = Number(e.score) || 0;
-      html += `<div class="dc-row custom-ls-row" data-custom-key="${escapeAttr((e.name||"") + "||" + (e.channel||""))}">
+      const enabled = e.enabled !== false;
+      const channelKey = `${e.name || ""}||${e.channel || ""}`;
+      html += `<div class="dc-row by-name-row${enabled ? "" : " parked"} custom-ls-row" data-custom-key="${escapeAttr(channelKey)}">
         <div>
-          <div class="dc-name">${escapeHtml(e.name || "")} <span style="color:var(--muted);font-weight:400">/ ${escapeHtml(e.channel || "")}</span></div>
+          <div class="dc-name">${escapeHtml(e.name || "")} <span style="color:var(--muted);font-weight:400">/ ${escapeHtml(e.channel || "")}</span> <span style="color:var(--muted);font-weight:400">(custom)</span></div>
           <div class="dc-meta">${escapeHtml(e.comment || "no comment")}</div>
         </div>
-        <div class="dc-meta">custom</div>
-        <div>${scoreSelect(score, "ls", `${e.name || ""}||${e.channel || ""}`)}</div>
-        <div><button class="danger" data-remove-custom="${escapeAttr((e.name||"") + "||" + (e.channel||""))}" title="Remove">×</button></div>
+        <div class="dc-meta enable-cell">
+          <label class="enable-toggle">
+            <input type="checkbox" data-ls-enable="${escapeAttr(channelKey)}" ${enabled ? "checked" : ""} />
+            <span>${enabled ? "active" : "inactive"}</span>
+          </label>
+        </div>
+        <div>${scoreSelect(score, "ls", channelKey)}</div>
+        <div><button class="danger" data-remove-custom="${escapeAttr(channelKey)}" title="Remove">×</button></div>
       </div>`;
     }
   }
 
-  html += `<div class="ds-row header">
-    <div></div><div>Log source / Data component</div><div>Coverage</div><div>Score</div>
-  </div>`;
+  if (hierarchy.size === 0 && customEntries.length === 0) {
+    root.innerHTML = `<div style="padding:20px;color:var(--muted)">No data components match your filter.</div>`;
+    return;
+  }
 
-  for (const ds of sources) {
-    const expanded = state.expanded.has(ds.id);
-    const allLsIds = ds.components.flatMap(c => c.logSourceIds || []);
-    const lsTotal = new Set(allLsIds).size;
-    const lsCovered = new Set(allLsIds.filter(id => (lsScores.get(id)?.score || 0) > 0)).size;
+  // Sort components by name; render component group → log-source name
+  // sub-groups → channel rows.
+  const sortedDcIds = Array.from(hierarchy.keys()).sort((a, b) =>
+    hierarchy.get(a).dc.name.localeCompare(hierarchy.get(b).dc.name));
+
+  for (const dcId of sortedDcIds) {
+    const h = hierarchy.get(dcId);
+    const expandKey = `comp:${dcId}`;
+    const expanded = (filterText || filterPlatform) ? true : state.expanded.has(expandKey);
     html += `
-      <div class="ds-row" data-ds-id="${escapeAttr(ds.id)}">
-        <div class="toggle" data-toggle="${escapeAttr(ds.id)}">${expanded ? "▾" : "▸"}</div>
+      <div class="ds-row" data-ds-id="${escapeAttr(expandKey)}">
+        <div class="toggle" data-toggle="${escapeAttr(expandKey)}">${expanded ? "▾" : "▸"}</div>
         <div>
-          <div class="ds-name">${escapeHtml(ds.name)} <span style="color:var(--muted);font-weight:400">${escapeHtml(ds.attackId || "")}</span></div>
-          <div class="ds-meta">${escapeHtml(ds.platforms.join(", ") || "—")} · ${lsCovered}/${lsTotal} log sources scored</div>
+          <div class="ds-name">${escapeHtml(h.dc.name)} <span style="color:var(--muted);font-weight:400">${escapeHtml(h.sourceName)}</span></div>
+          <div class="ds-meta">${h.scoredChannels} of ${h.totalChannels} channels active · ${h.lsByName.size} log source${h.lsByName.size === 1 ? "" : "s"}</div>
         </div>
-        <div class="ds-meta">${ds.components.length} component${ds.components.length === 1 ? "" : "s"}</div>
-        <div class="ds-meta">${lsTotal} feed${lsTotal === 1 ? "" : "s"}</div>
+        <div class="ds-meta">${h.totalChannels} channel${h.totalChannels === 1 ? "" : "s"}</div>
+        <div class="ds-meta"></div>
       </div>`;
-    // Lazy: skip the per-component inner rows when the group is collapsed.
     if (!expanded) continue;
-    html += `
-      <div class="ds-components open" data-components-for="${escapeAttr(ds.id)}">
-        ${ds.components.map(dc => {
-          const compEff = compScores.get(dc.id);
-          const compScore = compEff?.score ?? 0;
-          const lsList = (dc.logSourceIds || []).map(id => state.attack.logSourceById?.get(id)).filter(Boolean);
-          const compHeader = `<div class="dc-row">
-            <div>
-              <div class="dc-name">${escapeHtml(dc.name)} <span style="color:var(--muted);font-weight:400">(component)</span></div>
-              <div class="dc-meta">${dc.techniqueIds.length} technique${dc.techniqueIds.length === 1 ? "" : "s"} · effective score ${compScore}</div>
-            </div>
-            <div class="dc-meta">${lsList.length} log source${lsList.length === 1 ? "" : "s"}</div>
-            <div class="dc-meta">${compEff?.hasOverride ? "(scored)" : "(none)"}</div>
-          </div>`;
-          const lsRows = lsList.map(ls => {
-            const eff = lsScores.get(ls.id);
-            const score = eff?.score ?? 0;
-            return `<div class="dc-row" style="padding-left:24px">
-              <div>
-                <div class="dc-name">${escapeHtml(ls.name)} <span style="color:var(--muted);font-weight:400">/ ${escapeHtml(ls.channel || "")}</span></div>
-                <div class="dc-meta">${eff?.hasV2Override ? "user-set" : "projected from inventory score"}</div>
-              </div>
-              <div class="dc-meta">${ls.componentIds?.length || 0} comp${(ls.componentIds?.length || 0) === 1 ? "" : "s"}</div>
-              <div>${scoreSelect(score, "ls", `${ls.name}||${ls.channel || ""}`)}</div>
-            </div>`;
-          }).join("");
-          return compHeader + lsRows;
-        }).join("") || `<div class="dc-meta">No components defined.</div>`}
-      </div>
-    `;
+    html += `<div class="ds-components open" data-components-for="${escapeAttr(expandKey)}">`;
+
+    const sortedNames = Array.from(h.lsByName.keys()).sort((a, b) => a.localeCompare(b));
+    for (const name of sortedNames) {
+      const grp = h.lsByName.get(name);
+      grp.rows.sort((a, b) => (a.ls.channel || "").localeCompare(b.ls.channel || ""));
+      html += `<div class="ls-subgroup">
+        <div class="ls-subgroup-h">
+          <strong>${escapeHtml(name)}</strong>
+          <span style="color:var(--muted);font-size:11px">${grp.scored} of ${grp.total} channel${grp.total === 1 ? "" : "s"} active</span>
+        </div>`;
+      for (const r of grp.rows) {
+        const otherCompCount = (r.ls.componentIds?.size || r.ls.componentIds?.length || 1) - 1;
+        const channelKey = `${r.ls.name || ""}||${r.ls.channel || ""}`;
+        const meta = r.entry?.comment
+          ? r.entry.comment
+          : (otherCompCount > 0 ? `also feeds ${otherCompCount} other component${otherCompCount === 1 ? "" : "s"}` : "single-component channel");
+        html += `<div class="dc-row by-name-row${r.enabled ? "" : " parked"}" data-ls-row="${escapeAttr(r.ls.id)}">
+          <div>
+            <div class="dc-name">${escapeHtml(r.ls.channel || "(no channel)")}</div>
+            <div class="dc-meta">${escapeHtml(meta)}</div>
+          </div>
+          <div class="dc-meta enable-cell">
+            <label class="enable-toggle">
+              <input type="checkbox" data-ls-enable="${escapeAttr(channelKey)}" ${r.enabled ? "checked" : ""} />
+              <span>${r.enabled ? "active" : "inactive"}</span>
+            </label>
+          </div>
+          <div>${scoreSelect(r.score, "ls", channelKey)}</div>
+        </div>`;
+      }
+      html += `</div>`;
+    }
+
+    html += `</div>`;
   }
   root.innerHTML = html;
 
+  // Wire interactions — same handlers as renderInventoryByName.
   root.querySelectorAll("[data-toggle]").forEach(el => {
     el.addEventListener("click", () => {
       const id = el.getAttribute("data-toggle");
@@ -573,6 +643,14 @@ function renderLogSourceInventory(root, compScores, lsScores) {
     sel.addEventListener("change", () => {
       const [name, channel] = sel.dataset.key.split("||");
       setLogSourceScore(state.inventory, name, channel, Number(sel.value));
+      saveInventory(state.inventory);
+      refreshAll();
+    });
+  });
+  root.querySelectorAll("input[type=checkbox][data-ls-enable]").forEach(box => {
+    box.addEventListener("change", () => {
+      const [name, channel] = box.dataset.lsEnable.split("||");
+      setLogSourceEnabled(state.inventory, name, channel, box.checked);
       saveInventory(state.inventory);
       refreshAll();
     });
