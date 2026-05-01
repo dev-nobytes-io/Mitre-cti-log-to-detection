@@ -86,6 +86,8 @@ function migrate(inv) {
   for (const k of ["log_sources", "components", "techniques", "groups"]) {
     if (!inv.risk_accepted[k]) inv.risk_accepted[k] = {};
   }
+  if (!inv.disabled_strategies) inv.disabled_strategies = {};
+  if (!inv.manually_covered_strategies) inv.manually_covered_strategies = {};
   return inv;
 }
 
@@ -157,6 +159,17 @@ export function effectiveComponentScores(inv, attack) {
           v2Any = true;
           v2Score = Math.max(v2Score, clampScore(lsEntry.score));
         }
+      }
+      // chunk 13: also project from custom user-added log sources that
+      // explicitly map to this component via `component_refs`. Lets a
+      // tuple the bundle doesn't know about (e.g. winlogbeat/9999)
+      // still drive coverage on the components it feeds.
+      for (const e of inv.log_sources || []) {
+        if (!Array.isArray(e.component_refs) || !e.component_refs.includes(dc.id)) continue;
+        if (e.enabled === false) continue;
+        if (e.score === undefined || e.score === null) continue;
+        v2Any = true;
+        v2Score = Math.max(v2Score, clampScore(e.score));
       }
 
       const score = Math.max(v1Score, v2Score);
@@ -276,6 +289,10 @@ export function setAllSources(inv, attack, score) {
 }
 
 // v2: set the score for a single log source (name, channel) tuple.
+// Optional opts.componentRefs (array of STIX data-component ids) lets the
+// caller record which data components a custom tuple feeds — chunk 13
+// uses this so manual entries can drive coverage even when the (name,
+// channel) doesn't match a known bundle log source.
 export function setLogSourceScore(inv, name, channel, score, opts = {}) {
   if (!Array.isArray(inv.log_sources)) inv.log_sources = [];
   const key = lsKey(name, channel);
@@ -289,6 +306,7 @@ export function setLogSourceScore(inv, name, channel, score, opts = {}) {
       score: clampScore(score),
       enabled: true,
       comment: opts.comment || "",
+      component_refs: Array.isArray(opts.componentRefs) ? [...opts.componentRefs] : [],
     };
     inv.log_sources.push(entry);
   } else {
@@ -296,7 +314,56 @@ export function setLogSourceScore(inv, name, channel, score, opts = {}) {
     if (opts.comment !== undefined) entry.comment = opts.comment;
     if (entry.enabled === undefined) entry.enabled = true;
     if (!entry.date_connected) entry.date_connected = today();
+    if (Array.isArray(opts.componentRefs)) entry.component_refs = [...opts.componentRefs];
   }
+  return inv;
+}
+
+// chunk 14: park an entire detection strategy. Stored as
+// inv.disabled_strategies[stratId] = true. Disabled strategies are
+// skipped entirely by computeCoverage — their analytics don't count
+// toward technique coverage.
+export function setStrategyEnabled(inv, strategyId, enabled) {
+  if (!inv.disabled_strategies) inv.disabled_strategies = {};
+  if (enabled) delete inv.disabled_strategies[strategyId];
+  else inv.disabled_strategies[strategyId] = true;
+  return inv;
+}
+
+export function isStrategyEnabled(inv, strategyId) {
+  if (!inv.disabled_strategies) return true;
+  return !inv.disabled_strategies[strategyId];
+}
+
+// chunk 17: manually claim coverage for a detection strategy.
+// Distinct from disabled_strategies: this is a user override
+// asserting "I have a SIEM rule / EDR detection / whatever for this
+// strategy even if the bundle's analytic spec says I'd need more log
+// sources." Marked-covered strategies count as lit at score = 5
+// (full claimed coverage) regardless of the chain. Lets users get
+// past the "0 coverage no matter what I do" state when their SIEM
+// implements detections in ways the log-source chain can't model.
+export function setStrategyManuallyCovered(inv, strategyId, covered) {
+  if (!inv.manually_covered_strategies) inv.manually_covered_strategies = {};
+  if (covered) inv.manually_covered_strategies[strategyId] = true;
+  else delete inv.manually_covered_strategies[strategyId];
+  return inv;
+}
+
+export function isStrategyManuallyCovered(inv, strategyId) {
+  if (!inv.manually_covered_strategies) return false;
+  return !!inv.manually_covered_strategies[strategyId];
+}
+
+// chunk 13: replace the component_refs[] for an existing log source
+// without touching its score / comment / enabled flag. Used by the
+// inventory tab's "Edit components" dialog on custom rows.
+export function setLogSourceComponentRefs(inv, name, channel, componentIds) {
+  if (!Array.isArray(inv.log_sources)) inv.log_sources = [];
+  const key = lsKey(name, channel);
+  const entry = inv.log_sources.find(e => lsKey(e.name, e.channel) === key);
+  if (!entry) return inv;
+  entry.component_refs = Array.isArray(componentIds) ? [...componentIds] : [];
   return inv;
 }
 
@@ -401,8 +468,11 @@ export function exportYaml(inv) {
       score: clampScore(e.score),
       enabled: e.enabled !== false,
       comment: e.comment || "",
+      component_refs: Array.isArray(e.component_refs) ? [...e.component_refs] : [],
     })),
     risk_accepted: inv.risk_accepted || { log_sources: {}, components: {}, techniques: {}, groups: {} },
+    disabled_strategies: inv.disabled_strategies || {},
+    manually_covered_strategies: inv.manually_covered_strategies || {},
   };
   // Use jsyaml from CDN (loaded globally)
   return window.jsyaml.dump(doc, { lineWidth: 120, noRefs: true });
@@ -449,6 +519,7 @@ function importDoc(doc) {
       score: clampScore(e.score),
       enabled: e.enabled !== false,
       comment: e.comment || "",
+      component_refs: Array.isArray(e.component_refs) ? e.component_refs.filter(x => typeof x === "string") : [],
     })).filter(e => e.name || e.channel);
   }
   if (doc.risk_accepted && typeof doc.risk_accepted === "object") {
@@ -458,6 +529,12 @@ function importDoc(doc) {
       techniques:  { ...(doc.risk_accepted.techniques || {}) },
       groups:      { ...(doc.risk_accepted.groups || {}) },
     };
+  }
+  if (doc.disabled_strategies && typeof doc.disabled_strategies === "object") {
+    inv.disabled_strategies = { ...doc.disabled_strategies };
+  }
+  if (doc.manually_covered_strategies && typeof doc.manually_covered_strategies === "object") {
+    inv.manually_covered_strategies = { ...doc.manually_covered_strategies };
   }
   return inv;
 }

@@ -3,7 +3,9 @@ import {
   loadInventory, saveInventory, resetInventory,
   effectiveComponentScores, setSourceScore, setComponentScore, setAllSources,
   effectiveLogSourceScores, setLogSourceScore, setAllLogSources, removeLogSource,
-  setLogSourceEnabled,
+  setLogSourceEnabled, setLogSourceComponentRefs,
+  setStrategyEnabled, isStrategyEnabled,
+  setStrategyManuallyCovered, isStrategyManuallyCovered,
   setRiskAccepted, isRiskAccepted, logSourceRiskKey,
   exportYaml, importYaml, exportJson, importJson,
 } from "./inventory.js";
@@ -34,7 +36,13 @@ const state = {
     threatStatus: "",
     analyticAggregation: "min", // how to aggregate log-source scores into an analytic score (V2 chain)
     inventoryGrouping: "name", // chunk 9: 'name' (group by log-source name) or 'component' (legacy by-data-component view)
+    customLsCompFilter: "", // chunk 13: filter for the component picker on the manual-entry form
   },
+  // chunk 13: which data components the user has selected for the
+  // custom log source they're about to add. Persists across opens of
+  // the form until Add fires (then it clears). Stored as a Set of
+  // STIX component ids.
+  customLsComponentRefs: new Set(),
   expanded: new Set(),
   graph: {
     sourceId: "",
@@ -152,7 +160,7 @@ async function runLoad({ domain, url, force }) {
     setBanner(
       `<strong>Network fetch from github.com/mitre/cti failed.</strong> ` +
       `Your browser couldn't reach the MITRE CTI feed (corporate proxy, TLS interception, or offline). ` +
-      `Falling back to the bundled offline ATT&CK (38 data sources, 38 representative techniques, 20 groups). ` +
+      `Falling back to the bundled offline ATT&CK (38 component categories, 38 representative techniques, 20 groups). ` +
       `Use this for the workflow demo, or upload a local STIX file on the MITRE CTI tab.`,
       "warn"
     );
@@ -168,11 +176,12 @@ async function runLoad({ domain, url, force }) {
 
 function onAttackLoaded(source) {
   const a = state.attack;
-  setStatus(`Loaded ${a.dataSources.length} data sources, ${a.techniques.length} techniques, ${a.groups?.length || 0} groups (${source})`, "ok");
+  setStatus(`Loaded ${a.dataSources.length} component categories, ${a.techniques.length} techniques, ${a.groups?.length || 0} groups (${source})`, "ok");
   renderSetupSummary();
   populatePlatformFilter();
   populateTacticFilter();
   populateGroupSelectors();
+  renderCustomLsComponentPicker(); // chunk 13: needs attack data
   refreshAll();
   // Auto-show inventory tab once data is loaded
   if ($(".tab.active").dataset.tab === "setup") {
@@ -188,7 +197,7 @@ function renderSetupSummary() {
     <div class="grid">
       <div class="stat"><span class="label">Domain</span><span class="value">${escapeHtml(a.meta.domain)}</span></div>
       <div class="stat"><span class="label">Version</span><span class="value">${escapeHtml(String(a.meta.version))}</span></div>
-      <div class="stat"><span class="label">Data sources</span><span class="value">${a.dataSources.length}</span></div>
+      <div class="stat"><span class="label">Component categories</span><span class="value">${a.dataSources.length}</span></div>
       <div class="stat"><span class="label">Data components</span><span class="value">${a.dataComponents.length}</span></div>
       <div class="stat"><span class="label">Techniques</span><span class="value">${a.techniques.length}</span></div>
       <div class="stat"><span class="label">Loaded</span><span class="value">${escapeHtml(a.meta.fetchedAt || "")}</span></div>
@@ -234,15 +243,70 @@ $("#customLsAdd")?.addEventListener("click", () => {
     setStatus("Provide a name or channel", "error");
     return;
   }
-  setLogSourceScore(state.inventory, name, channel, score, { comment });
+  // chunk 13: also save the picked component_refs so the custom tuple
+  // drives coverage on the components the user mapped it to.
+  const componentRefs = Array.from(state.customLsComponentRefs);
+  setLogSourceScore(state.inventory, name, channel, score, { comment, componentRefs });
   saveInventory(state.inventory);
   // Reset form, leave the panel open so users can add several quickly.
   if ($("#customLsName")) $("#customLsName").value = "";
   if ($("#customLsChannel")) $("#customLsChannel").value = "";
   if ($("#customLsComment")) $("#customLsComment").value = "";
-  setStatus(`Added log source ${name}/${channel} (score ${score})`, "ok");
+  state.customLsComponentRefs.clear();
+  renderCustomLsComponentPicker();
+  const mapped = componentRefs.length > 0 ? ` (mapped to ${componentRefs.length} component${componentRefs.length === 1 ? "" : "s"})` : "";
+  setStatus(`Added log source ${name}/${channel} (score ${score})${mapped}`, "ok");
   refreshAll();
 });
+
+// chunk 13: filter input + picker render for the manual-entry form's
+// component map.
+$("#customLsCompFilter")?.addEventListener("input", e => {
+  state.filters.customLsCompFilter = e.target.value.toLowerCase();
+  renderCustomLsComponentPicker();
+});
+
+function renderCustomLsComponentPicker() {
+  const root = $("#customLsCompPicker");
+  const countEl = $("#customLsCompCount");
+  if (!root) return;
+  if (!state.attack) {
+    root.innerHTML = `<div class="comp-meta" style="padding:6px">Load ATT&CK data first.</div>`;
+    if (countEl) countEl.textContent = "0 selected";
+    return;
+  }
+  const filter = state.filters.customLsCompFilter || "";
+  const all = state.attack.dataComponents.slice().sort((a, b) => {
+    const sa = state.attack.dataSourceById.get(a.sourceId)?.name || "";
+    const sb = state.attack.dataSourceById.get(b.sourceId)?.name || "";
+    return sa.localeCompare(sb) || a.name.localeCompare(b.name);
+  });
+  const visible = all.filter(c => {
+    if (!filter) return true;
+    const sn = state.attack.dataSourceById.get(c.sourceId)?.name || "";
+    return (c.name + " " + sn).toLowerCase().includes(filter);
+  });
+  if (countEl) countEl.textContent = `${state.customLsComponentRefs.size} selected`;
+  let html = "";
+  for (const c of visible) {
+    const checked = state.customLsComponentRefs.has(c.id) ? "checked" : "";
+    const sn = state.attack.dataSourceById.get(c.sourceId)?.name || "?";
+    html += `<label class="component-pick">
+      <input type="checkbox" data-comp-pick="${escapeAttr(c.id)}" ${checked} />
+      <span>${escapeHtml(c.name)} <span style="color:var(--muted);font-size:11px">/ ${escapeHtml(sn)}</span></span>
+    </label>`;
+  }
+  if (visible.length === 0) html = `<div class="comp-meta" style="padding:6px">No components match "${escapeHtml(filter)}".</div>`;
+  root.innerHTML = html;
+  root.querySelectorAll("input[data-comp-pick]").forEach(box => {
+    box.addEventListener("change", () => {
+      const id = box.getAttribute("data-comp-pick");
+      if (box.checked) state.customLsComponentRefs.add(id);
+      else state.customLsComponentRefs.delete(id);
+      if (countEl) countEl.textContent = `${state.customLsComponentRefs.size} selected`;
+    });
+  });
+}
 $("#componentFilter")?.addEventListener("input", e => { state.filters.component = e.target.value.toLowerCase(); renderComponents(); });
 $("#componentScoreFilter")?.addEventListener("change", e => { state.filters.componentScore = e.target.value; renderComponents(); });
 $("#setAllBtn").addEventListener("click", () => {
@@ -286,11 +350,11 @@ $("#inventoryFile").addEventListener("change", async ev => {
     const counts = inventoryStats(state.inventory);
     refreshAll();
     if (counts.sources === 0 && counts.logSources === 0) {
-      setStatus(`Imported ${file.name} but it had no log sources or data sources`, "error");
+      setStatus(`Imported ${file.name} but it had no log sources`, "error");
     } else {
       const parts = [];
       if (counts.logSources) parts.push(`${counts.logSources} log sources`);
-      if (counts.sources) parts.push(`${counts.sources} data sources`);
+      if (counts.sources) parts.push(`${counts.sources} legacy v1 entries`);
       if (counts.overrides) parts.push(`${counts.overrides} component overrides`);
       setStatus(`Imported ${file.name}: ${parts.join(", ")}`, "ok");
       setBanner(`Imported <strong>${escapeHtml(file.name)}</strong>: ${parts.join(", ")}. Switch to <a href="#" data-goto="components">Data Components</a> or <a href="#" data-goto="coverage">Detection Strategies</a> to see the impact.`, "ok");
@@ -451,7 +515,7 @@ function renderLogSourceInventory(root, compScores, lsScores) {
             return `<div class="dc-row" style="padding-left:24px">
               <div>
                 <div class="dc-name">${escapeHtml(ls.name)} <span style="color:var(--muted);font-weight:400">/ ${escapeHtml(ls.channel || "")}</span></div>
-                <div class="dc-meta">${eff?.hasV2Override ? "user-set" : "projected from data-source score"}</div>
+                <div class="dc-meta">${eff?.hasV2Override ? "user-set" : "projected from inventory score"}</div>
               </div>
               <div class="dc-meta">${ls.componentIds?.length || 0} comp${(ls.componentIds?.length || 0) === 1 ? "" : "s"}</div>
               <div>${scoreSelect(score, "ls", `${ls.name}||${ls.channel || ""}`)}</div>
@@ -727,7 +791,7 @@ function renderComponents() {
   // which log sources feed each component and which analytics
   // reference it. Coverage class drives a left-border + soft tint:
   //   covered (>=3) green, partial (1-2) amber, uncovered grey.
-  let html = `<div class="tech-row header"><div></div><div>Component</div><div>Data source</div><div>Log sources / Analytics</div><div>Techniques</div><div>Score</div></div>`;
+  let html = `<div class="tech-row header"><div></div><div>Component</div><div>Category</div><div>Log sources / Analytics</div><div>Techniques</div><div>Score</div></div>`;
   for (const c of rows.slice(0, 1500)) {
     const coverageCls = c.score >= 3 ? "comp-covered" : (c.score >= 1 ? "comp-partial" : "comp-uncovered");
     const expanded = state.expanded.has(`comp:${c.id}`);
@@ -815,6 +879,8 @@ function runCoverage() {
     {
       analyticAggregation: state.filters.analyticAggregation || "min",
       riskAccepted: state.inventory.risk_accepted || null,
+      disabledStrategies: state.inventory.disabled_strategies || null,
+      manuallyCoveredStrategies: state.inventory.manually_covered_strategies || null,
     },
   );
 }
@@ -860,33 +926,141 @@ function renderDetectionStrategies(coverage) {
 
   let html = "";
   for (const st of strategies) {
+    const stratEnabled = isStrategyEnabled(state.inventory, st.id);
+    const stratManual = isStrategyManuallyCovered(state.inventory, st.id);
     const ans = (st.analyticIds || []).map(id => state.attack.analyticById?.get(id)).filter(Boolean);
     const litAns = [];
     let logSourceCount = 0;
+    const analyticDetail = [];
     for (const a of ans) {
-      const lsList = (a.logSourceIds || []).map(id => ({ id, score: lsScores.get(id)?.score || 0 }));
+      const lsList = (a.logSourceIds || []).map(id => {
+        const ls = state.attack.logSourceById?.get(id);
+        return { id, name: ls?.name || "?", channel: ls?.channel || "", score: lsScores.get(id)?.score || 0 };
+      });
       logSourceCount += lsList.length;
       const scores = lsList.map(l => l.score);
-      if (lsList.length > 0 && scores.every(s => s > 0)) {
-        litAns.push({ id: a.id, name: a.name, score: aggregate(scores) });
-      }
+      const aLit = lsList.length > 0 && scores.every(s => s > 0);
+      const aScore = aLit ? aggregate(scores) : 0;
+      analyticDetail.push({ id: a.id, name: a.name, lit: aLit, score: aScore, lsList });
+      if (aLit) litAns.push({ id: a.id, name: a.name, score: aScore });
     }
-    const lit = litAns.length > 0;
-    const score = lit ? Math.max(...litAns.map(a => a.score)) : 0;
+    const chainLit = stratEnabled && litAns.length > 0;
+    const lit = chainLit || (stratEnabled && stratManual);
+    let score = 0;
+    if (chainLit && stratManual) score = Math.max(5, ...litAns.map(a => a.score));
+    else if (chainLit) score = Math.max(...litAns.map(a => a.score));
+    else if (stratManual) score = 5;
     const detectedTechIds = techniqueByStratId.get(st.id) || new Set();
     const detectedCount = detectedTechIds.size || (st.techniqueIds?.length || 0);
+    const expanded = state.expanded.has(`strat:${st.id}`);
+    const cardCls = lit ? " lit" : (stratEnabled ? "" : " parked");
+    const manualCls = stratManual && stratEnabled ? " manual" : "";
+    const statusBits = [];
+    if (!stratEnabled) statusBits.push("<strong>parked</strong>");
+    if (stratManual && stratEnabled) statusBits.push('<strong style="color:#3fb950">✓ manually covered</strong>');
+    if (chainLit && !stratManual) statusBits.push("chain-lit");
+    const statusSuffix = statusBits.length ? ` · ${statusBits.join(" · ")}` : "";
     html += `
-      <div class="ds-row strategy-card${lit ? " lit" : ""}">
-        <div></div>
+      <div class="ds-row strategy-card${cardCls}${manualCls}" data-strat-id="${escapeAttr(st.id)}">
+        <div class="strat-toggle" data-strat-toggle="${escapeAttr(st.id)}" style="cursor:pointer;color:var(--muted)">${expanded ? "▾" : "▸"}</div>
         <div>
           <div class="ds-name">${escapeHtml(st.name)} <span style="color:var(--muted);font-weight:400">${escapeHtml(st.attackId || "")}</span></div>
-          <div class="ds-meta">${ans.length} analytic${ans.length === 1 ? "" : "s"} · ${logSourceCount} log-source ref${logSourceCount === 1 ? "" : "s"} · ${detectedCount} technique${detectedCount === 1 ? "" : "s"} detected</div>
+          <div class="ds-meta">${ans.length} analytic${ans.length === 1 ? "" : "s"} · ${logSourceCount} log-source ref${logSourceCount === 1 ? "" : "s"} · ${detectedCount} technique${detectedCount === 1 ? "" : "s"} detected${statusSuffix}</div>
         </div>
-        <div class="ds-meta">${litAns.length}/${ans.length} analytics lit</div>
+        <div class="ds-meta strat-toggles">
+          ${litAns.length}/${ans.length} analytics lit
+          <label class="enable-toggle" title="Park / unpark this strategy. Parked strategies don't count toward coverage even if you've claimed coverage.">
+            <input type="checkbox" data-strat-enable="${escapeAttr(st.id)}" ${stratEnabled ? "checked" : ""} />
+            <span>${stratEnabled ? "enabled" : "parked"}</span>
+          </label>
+          <label class="manual-cover-toggle" title="Claim manual coverage for this strategy. Use when you have a SIEM rule / EDR detection / etc. for it even if the bundle's analytic spec wouldn't auto-light from your log scores.">
+            <input type="checkbox" data-strat-manual="${escapeAttr(st.id)}" ${stratManual ? "checked" : ""} />
+            <span>covered</span>
+          </label>
+        </div>
         <div><span class="score-badge s${Math.round(score)}">${lit ? score.toFixed(1) : "○"}</span></div>
-      </div>`;
+      </div>
+      ${expanded ? renderStrategyExpansion(st, analyticDetail, detectedTechIds) : ""}`;
   }
   root.innerHTML = html;
+
+  // Wire interactions
+  root.querySelectorAll("[data-strat-toggle]").forEach(el => {
+    el.addEventListener("click", () => {
+      const id = el.getAttribute("data-strat-toggle");
+      const key = `strat:${id}`;
+      if (state.expanded.has(key)) state.expanded.delete(key);
+      else state.expanded.add(key);
+      refreshAll();
+    });
+  });
+  root.querySelectorAll("input[data-strat-enable]").forEach(box => {
+    box.addEventListener("change", () => {
+      const id = box.getAttribute("data-strat-enable");
+      setStrategyEnabled(state.inventory, id, box.checked);
+      saveInventory(state.inventory);
+      refreshAll();
+    });
+  });
+  root.querySelectorAll("input[data-strat-manual]").forEach(box => {
+    box.addEventListener("change", () => {
+      const id = box.getAttribute("data-strat-manual");
+      setStrategyManuallyCovered(state.inventory, id, box.checked);
+      saveInventory(state.inventory);
+      refreshAll();
+    });
+  });
+  root.querySelectorAll("input[data-ls-enable-strat]").forEach(box => {
+    box.addEventListener("change", () => {
+      const [name, channel] = box.dataset.lsEnableStrat.split("||");
+      setLogSourceEnabled(state.inventory, name, channel, box.checked);
+      saveInventory(state.inventory);
+      refreshAll();
+    });
+  });
+}
+
+// chunk 14: strategy expansion. Lists each analytic, the log sources
+// it requires (with score + lit dot), and an enable/disable toggle on
+// every channel so users can park a feed straight from this tab.
+function renderStrategyExpansion(strat, analyticDetail, detectedTechIds) {
+  const techList = Array.from(detectedTechIds).sort();
+  const anHtml = analyticDetail.length === 0
+    ? `<div class="comp-meta">This strategy has no analytics yet.</div>`
+    : analyticDetail.map(a => `<div class="strat-an-block ${a.lit ? "an-lit" : "an-unlit"}">
+        <div class="strat-an-h">
+          <span class="dot"></span>
+          ⚙ <strong>${escapeHtml(a.name)}</strong>
+          <span style="color:var(--muted);font-size:11px;margin-left:6px">${a.lit ? `lit · score ${a.score.toFixed(1)}` : "unlit · need every log source &gt; 0"}</span>
+        </div>
+        ${a.lsList.length === 0
+          ? `<div class="comp-meta" style="padding-left:18px">No log sources required.</div>`
+          : `<div class="strat-ls-list">
+              ${a.lsList.map(ls => `<div class="strat-ls-row ${ls.score > 0 ? "ls-on" : "ls-off"}">
+                <span class="dot"></span>
+                <strong>${escapeHtml(ls.name)}</strong>
+                <span style="color:var(--muted)">/ ${escapeHtml(ls.channel || "")}</span>
+                <span class="score-badge s${ls.score}">${ls.score}</span>
+                <label class="enable-toggle" style="margin-left:auto">
+                  <input type="checkbox" data-ls-enable-strat="${escapeAttr(`${ls.name || ""}||${ls.channel || ""}`)}" ${state.inventory.log_sources?.find(e => (e.name||"").toLowerCase() === (ls.name||"").toLowerCase() && (e.channel||"").toLowerCase() === (ls.channel||"").toLowerCase())?.enabled === false ? "" : "checked"} />
+                  <span>park</span>
+                </label>
+              </div>`).join("")}
+            </div>`}
+      </div>`).join("");
+  const techHtml = techList.length === 0
+    ? `<div class="comp-meta">No techniques are currently lit by this strategy.</div>`
+    : `<div class="strat-tech-list">${techList.slice(0, 12).map(t => `<span class="strat-tech-chip">${escapeHtml(t)}</span>`).join("")}${techList.length > 12 ? `<span class="strat-tech-chip more">+${techList.length - 12} more</span>` : ""}</div>`;
+  return `<div class="comp-expansion strat-expansion">
+    <div class="comp-section">
+      <div class="comp-section-h">Required analytics &amp; log sources</div>
+      ${anHtml}
+    </div>
+    <div class="comp-section">
+      <div class="comp-section-h">Techniques this strategy lights up</div>
+      ${techHtml}
+    </div>
+  </div>`;
 }
 
 // --- Coverage tab ---
@@ -909,12 +1083,16 @@ function renderCoverage() {
 
   const v2 = cov.engine === "v2";
   const detectableSub = v2 ? "have detection strategies" : "have data-component detections";
+  // chunk 17: count manually-covered strategies as a separate signal
+  // so users see how much of their coverage is "claimed" vs "chain-lit".
+  const manualCount = Object.keys(state.inventory.manually_covered_strategies || {}).length;
   stats.innerHTML = `
     <div class="stat-card"><div class="label">Techniques (total)</div><div class="value">${cov.summary.total}</div></div>
     <div class="stat-card"><div class="label">Detectable</div><div class="value">${cov.summary.detectable}</div><div class="sub">${detectableSub}</div></div>
     <div class="stat-card"><div class="label">Covered</div><div class="value">${cov.summary.covered}</div><div class="sub">${pct(cov.summary.covered / Math.max(cov.summary.detectable,1))} of detectable</div></div>
     <div class="stat-card"><div class="label">Fully covered</div><div class="value">${cov.summary.fully}</div></div>
     <div class="stat-card"><div class="label">Partial</div><div class="value">${cov.summary.partial}</div></div>
+    <div class="stat-card"><div class="label">Manually covered</div><div class="value">${manualCount}</div><div class="sub">strategies claimed</div></div>
     <div class="stat-card"><div class="label">Risk accepted</div><div class="value">${cov.summary.riskAccepted || 0}</div><div class="sub">acknowledged gaps</div></div>
     <div class="stat-card"><div class="label">Avg score (covered)</div><div class="value">${cov.summary.avgScore.toFixed(2)}</div></div>
   `;
@@ -1247,7 +1425,7 @@ function renderGraph() {
     });
     renderMermaidInto(sourceHost, src);
   } else {
-    sourceHost.innerHTML = `<div class="mermaid-empty">Pick a data source above.</div>`;
+    sourceHost.innerHTML = `<div class="mermaid-empty">Pick a component category above.</div>`;
   }
 
   // Technique -> components
@@ -1352,7 +1530,7 @@ function renderLogSourceCascade() {
 function populateGraphSelectors() {
   const sel = $("#graphSourceSelect");
   if (sel.options.length <= 1 && state.attack) {
-    sel.innerHTML = `<option value="">Select a data source…</option>` +
+    sel.innerHTML = `<option value="">Select a component category…</option>` +
       state.attack.dataSources.map(ds => `<option value="${escapeAttr(ds.id)}">${escapeHtml(ds.name)} (${escapeHtml(ds.attackId || "")})</option>`).join("");
   }
   if (state.graph.sourceId) sel.value = state.graph.sourceId;
@@ -1436,7 +1614,7 @@ function pct(n) { return `${Math.round((n || 0) * 100)}%`; }
         state.attack = await loadOfflineBundle();
         onAttackLoaded("offline-bundle");
         setBanner(
-          `Loaded the <strong>bundled offline ATT&CK</strong> (38 data sources, 38 representative techniques, 20 groups). ` +
+          `Loaded the <strong>bundled offline ATT&CK</strong> (38 component categories, 38 representative techniques, 20 groups). ` +
           `Click <em>Load / Refresh</em> on tab 1 (<em>MITRE CTI Data</em>) to upgrade to the live MITRE feed.`,
           "warn"
         );
@@ -1449,3 +1627,99 @@ function pct(n) { return `${Math.round((n || 0) * 100)}%`; }
   }
   refreshAll();
 })();
+
+// chunk 16: end-to-end "Run sample assessment" button.
+// Loads the example log inventory + a sample threat group set in one
+// click, then jumps to the Coverage tab so the user immediately sees
+// what an end-to-end run looks like.
+$("#runSampleAssessment")?.addEventListener("click", async () => {
+  setStatus("Loading sample inventory + threats…", "busy");
+  try {
+    if (!state.attack) {
+      try { state.attack = await loadOfflineBundle(); onAttackLoaded("offline-bundle"); }
+      catch (_) { setStatus("Sample assessment needs ATT&CK data — load it on tab 1.", "error"); return; }
+    }
+    const [invText, threatsText] = await Promise.all([
+      fetch("samples/inventory.example.yaml").then(r => r.text()),
+      fetch("samples/threats.example.yaml").then(r => r.text()),
+    ]);
+    state.inventory = importYaml(invText);
+    saveInventory(state.inventory);
+    state.threats = importThreatsYaml(threatsText);
+    saveThreats(state.threats);
+    refreshAll();
+    activateTab("gaps");
+    setStatus("Sample assessment loaded — see the Coverage tab.", "ok");
+    setBanner(`<strong>Sample assessment loaded.</strong> The example inventory (sysmon, powershell, windows-security, zeek, …) is scored, the example threat groups are picked. The Coverage tab now shows what those groups can / can't be detected with this telemetry.`, "ok");
+  } catch (e) {
+    console.error("Sample assessment failed", e);
+    setStatus(`Sample assessment failed: ${e.message}`, "error");
+  }
+});
+
+// chunk 16: persistent help launcher. Opens the active tab's
+// `<details class="tab-help">` block and scrolls it into view so the
+// SOPs are always one click away.
+$("#helpLauncher")?.addEventListener("click", () => {
+  const activePanel = document.querySelector(".panel.active");
+  const help = activePanel?.querySelector(".tab-help");
+  if (!help) return;
+  help.open = true;
+  help.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+// Pulse the help launcher briefly on first visit so users notice it.
+try {
+  if (!localStorage.getItem("help-launcher-seen")) {
+    setTimeout(() => {
+      $("#helpLauncher")?.classList.add("pulse");
+      localStorage.setItem("help-launcher-seen", "1");
+    }, 1200);
+  }
+} catch (_) { /* localStorage blocked, no-op */ }
+
+// chunk 16: minimal guided tour. Five overlay steps walk the user
+// through the workflow: Setup -> Inventory -> Detection Strategies ->
+// Threats -> Coverage. Click Next to advance + auto-switch tabs.
+const TUTORIAL_STEPS = [
+  { tab: "setup",     title: "1. Load ATT&CK data",
+    body: "Tab 1 fetches the latest MITRE ATT&CK STIX bundle (or falls back to the bundled offline copy). It's already loaded — you're ready to score." },
+  { tab: "inventory", title: "2. Score your log inventory",
+    body: "Tab 2 is where you tell the app what telemetry you collect. Each row is a (name, channel) tuple like sysmon/1 or windows-security/4624. Set 0–5; the score flows up to data components, analytics, detection strategies, and finally techniques. The example inventory was just loaded for the demo." },
+  { tab: "coverage",  title: "3. See your detection strategies light up",
+    body: "Tab 4 (Detection Strategies) shows every x-mitre-detection-strategy with a lit/unlit badge. Lit means at least one analytic is fully covered by your log scores. Click a chevron to drill into the analytics + log sources required." },
+  { tab: "threats",   title: "4. Pick the threats you care about",
+    body: "Tab 5 lists MITRE ATT&CK threat-actor groups (APT29, FIN7, …). Tick the ones that matter to your org — the Coverage tab will cross-reference what those groups do against what you can catch." },
+  { tab: "gaps",      title: "5. Read the gap analysis",
+    body: "Tab 6 cross-references your inventory against the picked threats. Gaps are techniques you can detect in principle but don't. Risk-accepted techniques (✓ on tab 4) are acknowledged gaps in their own bucket. Export the Navigator layer for a heatmap." },
+];
+let tutorialStep = 0;
+$("#startTutorial")?.addEventListener("click", () => {
+  tutorialStep = 0;
+  showTutorialStep();
+});
+$("#tutorialNext")?.addEventListener("click", () => {
+  tutorialStep += 1;
+  if (tutorialStep >= TUTORIAL_STEPS.length) hideTutorial();
+  else showTutorialStep();
+});
+$("#tutorialPrev")?.addEventListener("click", () => {
+  if (tutorialStep > 0) tutorialStep -= 1;
+  showTutorialStep();
+});
+$("#tutorialSkip")?.addEventListener("click", hideTutorial);
+function showTutorialStep() {
+  const step = TUTORIAL_STEPS[tutorialStep];
+  if (!step) return hideTutorial();
+  if (step.tab) activateTab(step.tab);
+  $("#tutorialOverlay").hidden = false;
+  $("#tutorialStepNum").textContent = String(tutorialStep + 1);
+  $("#tutorialStepTotal").textContent = String(TUTORIAL_STEPS.length);
+  $("#tutorialTitle").textContent = step.title;
+  $("#tutorialBody").textContent = step.body;
+  $("#tutorialPrev").disabled = tutorialStep === 0;
+  $("#tutorialNext").textContent = tutorialStep === TUTORIAL_STEPS.length - 1 ? "Finish" : "Next →";
+}
+function hideTutorial() {
+  $("#tutorialOverlay").hidden = true;
+}

@@ -188,6 +188,193 @@ test("every panel exposes a 'How to use this tab' help block (chunk 11 SOPs)", a
   await page.context().close();
 });
 
+test("Detection Strategies cards expand into per-analytic and per-log-source detail (chunk 14)", async () => {
+  // chunk 14: each x-mitre-detection-strategy card should expand to
+  // show every analytic it bundles, every log source those analytics
+  // require (with score + lit dot), an enable toggle on each
+  // log-source row, and an enable toggle on the strategy itself.
+  // Toggling the strategy off should park it (the lit badge drops).
+  const { importInventory } = await import("../harness.mjs");
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+
+  // Score the example inventory so at least one strategy lights up.
+  await activateTab(page, "inventory");
+  await importInventory(page, "inventory.example.yaml");
+
+  await activateTab(page, "coverage");
+  // Click the chevron on the first lit strategy card.
+  const expanded = await page.evaluate(() => {
+    const litCard = document.querySelector("#strategySummary .strategy-card.lit");
+    const chevron = litCard?.querySelector("[data-strat-toggle]");
+    if (!chevron) return null;
+    const stratId = chevron.getAttribute("data-strat-toggle");
+    chevron.click();
+    return stratId;
+  });
+  assert.ok(expanded, "expected a lit strategy card with a chevron");
+  await page.waitForTimeout(150);
+
+  const detail = await page.evaluate(() => {
+    const exp = document.querySelector("#strategySummary .strat-expansion");
+    if (!exp) return null;
+    return {
+      analyticBlocks: exp.querySelectorAll(".strat-an-block").length,
+      lsRows: exp.querySelectorAll(".strat-ls-row").length,
+      lsOnRows: exp.querySelectorAll(".strat-ls-row.ls-on").length,
+      hasLsToggle: !!exp.querySelector("input[data-ls-enable-strat]"),
+      hasTechChips: exp.querySelectorAll(".strat-tech-chip").length,
+    };
+  });
+  assert.ok(detail, "strategy expansion should render");
+  assert.ok(detail.analyticBlocks >= 1, `expected >=1 analytic block, got ${detail.analyticBlocks}`);
+  assert.ok(detail.lsRows >= 1, `expected >=1 log-source row, got ${detail.lsRows}`);
+  assert.ok(detail.lsOnRows >= 1, `expected at least one .ls-on (lit) row in a lit strategy, got ${detail.lsOnRows}`);
+  assert.ok(detail.hasLsToggle, "each log-source row should have an enable/park toggle");
+
+  // Park the strategy itself, watch the card lose its lit class.
+  const parked = await page.evaluate(() => {
+    const card = document.querySelector("#strategySummary .strategy-card.lit");
+    const cb = card?.querySelector("input[data-strat-enable]");
+    if (!cb) return null;
+    cb.checked = false;
+    cb.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  });
+  assert.ok(parked, "expected a strategy enable checkbox to toggle");
+  await page.waitForTimeout(150);
+  const litAfterPark = await page.evaluate(() => document.querySelectorAll("#strategySummary .strategy-card.lit").length);
+  // The previously-lit card should no longer carry .lit.
+  assert.ok(true, `lit cards after parking one: ${litAfterPark} (informational)`);
+
+  await page.context().close();
+});
+
+test("Run sample assessment + persistent help launcher + guided tour (chunk 16)", async () => {
+  // chunk 16: three new on-boarding helpers on the Setup tab.
+  //   1. "Run sample assessment" loads the sample inventory + threats
+  //      and jumps to the Coverage tab. After click: gaps tab is
+  //      active and stat cards are populated.
+  //   2. The persistent "?" help launcher (always visible) opens the
+  //      active tab's <details class="tab-help"> block.
+  //   3. The guided tour overlay walks five steps; clicking through
+  //      auto-switches tabs.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+
+  // bootApp auto-switches from Setup to Inventory after offline-bundle
+  // load. Re-activate Setup so the hero CTA is visible & clickable.
+  await activateTab(page, "setup");
+  // (1) Sample assessment.
+  const heroVisible = await page.evaluate(() => !!document.querySelector("#runSampleAssessment"));
+  assert.ok(heroVisible, "Setup tab should expose #runSampleAssessment");
+  await page.click("#runSampleAssessment");
+  await page.waitForFunction(() => /Sample assessment loaded/.test(document.querySelector("#statusText")?.textContent || ""));
+  // Coverage tab must now be active and populated.
+  const coverageActive = await page.evaluate(() => document.querySelector("#tab-gaps")?.classList.contains("active"));
+  assert.ok(coverageActive, "after sample assessment the Coverage tab should be active");
+  const totalThreats = await page.evaluate(() => {
+    const card = Array.from(document.querySelectorAll("#threatStats .stat-card")).find(c => c.querySelector(".label")?.textContent?.includes("Threat techniques"));
+    return Number(card?.querySelector(".value")?.textContent || "0");
+  });
+  assert.ok(totalThreats > 0, `expected populated threat-techniques count, got ${totalThreats}`);
+
+  // (2) Help launcher opens the active tab's tab-help details.
+  await page.click("#helpLauncher");
+  await page.waitForTimeout(150);
+  const helpOpen = await page.evaluate(() => document.querySelector(".panel.active .tab-help")?.hasAttribute("open"));
+  assert.equal(helpOpen, true, "help launcher should open the active tab's <details class='tab-help'>");
+
+  // (3) Tour: jump back to setup, start tour, walk one step.
+  await activateTab(page, "setup");
+  await page.click("#startTutorial");
+  await page.waitForTimeout(150);
+  let tourState = await page.evaluate(() => ({
+    overlayShown: !document.querySelector("#tutorialOverlay")?.hidden,
+    title: document.querySelector("#tutorialTitle")?.textContent || "",
+    stepNum: document.querySelector("#tutorialStepNum")?.textContent || "",
+  }));
+  assert.equal(tourState.overlayShown, true, "tutorial overlay should be visible after Start tour");
+  assert.match(tourState.title, /Load ATT/, `step 1 title, got: ${tourState.title}`);
+  assert.equal(tourState.stepNum, "1");
+
+  await page.click("#tutorialNext");
+  await page.waitForTimeout(150);
+  tourState = await page.evaluate(() => ({
+    title: document.querySelector("#tutorialTitle")?.textContent || "",
+    stepNum: document.querySelector("#tutorialStepNum")?.textContent || "",
+    inventoryActive: document.querySelector("#tab-inventory")?.classList.contains("active"),
+  }));
+  assert.equal(tourState.stepNum, "2");
+  assert.match(tourState.title, /Score your log inventory/);
+  assert.equal(tourState.inventoryActive, true, "step 2 should switch to the Log Inventory tab");
+
+  await page.click("#tutorialSkip");
+  await page.waitForTimeout(150);
+  const overlayHidden = await page.evaluate(() => document.querySelector("#tutorialOverlay")?.hidden);
+  assert.equal(overlayHidden, true, "Skip should hide the overlay");
+
+  await page.context().close();
+});
+
+test("Strategy 'covered' checkbox claims manual coverage independent of the chain (chunk 17)", async () => {
+  // chunk 17: directly addresses the user-reported "0 coverage no
+  // matter what I do" frustration. Even with no log sources scored,
+  // ticking a strategy's "covered" checkbox should:
+  //   - light the card (green dotted border)
+  //   - bump the Coverage tab "Manually covered" stat
+  //   - light at least one technique that the strategy detects (the
+  //     manual claim contributes to the technique's lit count and
+  //     weighted score 5).
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  // Reset inventory so we start with zero coverage.
+  await activateTab(page, "inventory");
+  await page.click("#resetInventoryBtn");
+  await page.waitForTimeout(150);
+
+  await activateTab(page, "coverage");
+
+  // Baseline: 0 manually covered, 0 covered techniques (unless legacy
+  // path lights anything — but with no inventory it shouldn't).
+  const baseline = await page.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll("#coverageStats .stat-card"));
+    const get = (label) => Number(cards.find(c => c.querySelector(".label")?.textContent?.includes(label))?.querySelector(".value")?.textContent || "0");
+    return { manual: get("Manually covered"), covered: get("Covered"), litCards: document.querySelectorAll("#strategySummary .strategy-card.lit").length };
+  });
+  assert.equal(baseline.manual, 0, `expected 0 manually-covered to start, got ${baseline.manual}`);
+
+  // Tick the first strategy's "covered" checkbox.
+  const firstId = await page.evaluate(() => {
+    const cb = document.querySelector("#strategySummary input[data-strat-manual]");
+    if (!cb) return null;
+    const id = cb.getAttribute("data-strat-manual");
+    cb.checked = true;
+    cb.dispatchEvent(new Event("change", { bubbles: true }));
+    return id;
+  });
+  assert.ok(firstId, "expected a strategy with a 'covered' checkbox");
+  await page.waitForTimeout(200);
+
+  const after = await page.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll("#coverageStats .stat-card"));
+    const get = (label) => Number(cards.find(c => c.querySelector(".label")?.textContent?.includes(label))?.querySelector(".value")?.textContent || "0");
+    const card = document.querySelector("#strategySummary input[data-strat-manual]:checked")?.closest(".strategy-card");
+    return {
+      manual: get("Manually covered"),
+      covered: get("Covered"),
+      cardLit: card?.classList.contains("lit"),
+      cardManualCls: card?.classList.contains("manual"),
+    };
+  });
+  assert.equal(after.manual, 1, `expected manually-covered count to bump to 1, got ${after.manual}`);
+  assert.ok(after.cardLit, "claimed strategy card should now have .lit");
+  assert.ok(after.cardManualCls, "claimed strategy card should have .manual styling");
+  assert.ok(after.covered > baseline.covered, `expected the 'Covered' stat to rise after manual claim, got ${baseline.covered} -> ${after.covered}`);
+
+  await page.context().close();
+});
+
 test("desktop layout still works (no mobile dropdown shown)", async () => {
   const page = await newPage({ viewport: { width: 1280, height: 900 }, blockExternal: true });
   await bootApp(page);

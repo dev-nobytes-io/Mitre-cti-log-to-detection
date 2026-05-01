@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ATT&amp;CK Data Source Inventory</title>
+  <title>ATT&amp;CK Log Source Inventory</title>
   <link rel="stylesheet" href="css/styles.css" />
   <script src="vendor/js-yaml.min.js" defer></script>
   <script src="vendor/mermaid.min.js" defer></script>
@@ -12,7 +12,7 @@
 <body>
   <header class="topbar">
     <div class="brand">
-      <h1>ATT&amp;CK Data Source Inventory</h1>
+      <h1>ATT&amp;CK Log Source Inventory</h1>
       <p class="subtitle">MITRE CTI &rarr; log inventory &rarr; data components &rarr; detection strategies &rarr; threats &rarr; coverage</p>
     </div>
     <div class="status" id="status">
@@ -46,6 +46,10 @@
     <section class="panel active" id="tab-setup" role="tabpanel">
       <h2>1. MITRE CTI Data</h2>
       <p>Pulls the latest <code>enterprise-attack.json</code> from <a href="https://github.com/mitre-attack/attack-stix-data" target="_blank" rel="noopener">github.com/mitre-attack/attack-stix-data</a>. Cached in your browser (IndexedDB) after the first load.</p>
+      <div class="hero-cta">
+        <button id="runSampleAssessment" class="primary big-cta" title="Loads the sample log inventory + a state-APT threat set, computes coverage, and jumps you to the Coverage tab. Best way to see the whole flow in 5 seconds.">⚡ Run a sample assessment end-to-end</button>
+        <button id="startTutorial" class="big-cta-secondary" title="Step-by-step walkthrough of every tab — what it does, what to click, where to look next.">🎓 Take a guided tour</button>
+      </div>
       <details class="tab-help">
         <summary>📖 How to use this tab + Quick start workflow</summary>
         <div class="tab-help-body">
@@ -103,7 +107,7 @@
         </div>
       </details>
       <div class="row">
-        <input type="search" id="dsFilter" placeholder="Filter data sources&hellip;" />
+        <input type="search" id="dsFilter" placeholder="Filter log sources&hellip;" />
         <select id="platformFilter">
           <option value="">All platforms</option>
         </select>
@@ -160,6 +164,12 @@
           <label>Comment <input type="text" id="customLsComment" placeholder="optional context" /></label>
           <button id="customLsAdd" class="primary">Add</button>
         </div>
+        <details class="component-map-form">
+          <summary>Map to data components <span class="muted-pill" id="customLsCompCount">0 selected</span></summary>
+          <p class="diagram-help">If your tuple doesn't match a known bundle log source, scoring it alone won't drive coverage. Tick the data components this feed actually observes (Process Creation, Logon Session Creation, etc.) and the score will project onto them.</p>
+          <input type="search" id="customLsCompFilter" placeholder="Filter components…" />
+          <div id="customLsCompPicker" class="component-picker"></div>
+        </details>
       </details>
       <div id="inventoryTable" class="ds-list"></div>
     </section>
@@ -202,13 +212,15 @@
           <p><strong>What it does:</strong> shows every <code>x-mitre-detection-strategy</code> in the loaded bundle and the techniques they unlock. A strategy is "lit" iff at least one of its analytics is lit; an analytic is "lit" iff every required log source has score &gt; 0.</p>
           <p><strong>Steps:</strong></p>
           <ol>
-            <li>Read the strategy summary cards at the top — green border = lit, dim = unlit. Each card lists the analytics it bundles, how many log sources are required, and how many techniques it detects.</li>
+            <li>Read the strategy summary cards at the top — green border = chain-lit, green dotted border = manually claimed coverage, dim = unlit. Each card lists the analytics it bundles, how many log sources are required, and how many techniques it detects.</li>
+            <li><strong>"covered" checkbox per strategy</strong> — if your SIEM / EDR has a detection in place for this strategy even though the bundle's analytic spec wouldn't auto-light from your log scores, tick it to claim manual coverage. Useful for "we have a custom Splunk rule that catches this even though the analytic wants log sources we don't ship." Lights the strategy at score 5.</li>
+            <li><strong>"enabled" checkbox per strategy</strong> — park a strategy you don't intend to run; it's hidden from coverage entirely (overrides any "covered" claim).</li>
             <li>Pick the <strong>Analytic score</strong> aggregator: <em>min</em> = strict (a chain is only as strong as its weakest log source); <em>avg</em> = lenient.</li>
             <li>Scroll to the technique table — score / coverage ratio / lit/partial badges per technique. Filter by tactic or coverage class.</li>
             <li>Click <strong>✓</strong> on any technique row to mark it <em>risk accepted</em> (acknowledged gap). It moves out of <em>Uncovered</em> and into the <em>Risk accepted</em> bucket.</li>
             <li>Use <em>Download detections Navigator layer</em> to export a heatmap.</li>
           </ol>
-          <p><strong>Capabilities:</strong> tactic + coverage filters, min/avg aggregator toggle, per-technique risk-accept toggle, Navigator layer export.</p>
+          <p><strong>Capabilities:</strong> tactic + coverage filters, min/avg aggregator toggle, per-strategy park / claim-coverage toggles, per-technique risk-accept toggle, Navigator layer export.</p>
         </div>
       </details>
       <div class="stats" id="coverageStats"></div>
@@ -318,7 +330,7 @@
           <ul>
             <li><strong>Conceptual model</strong> — abstract diagram of how a raw log becomes a Navigator score. No interaction.</li>
             <li><strong>Log source utility cascade</strong> — the most useful one. Pick log sources from the multi-select; the diagram renders <em>Log Source → Component → Analytic → Detection Strategy → Technique → Threat Group</em>. Lit (green) nodes are fully covered by your inventory; dim/yellow are blocked because at least one upstream log source is unscored. Use it to communicate <em>why</em> a particular event-code matters.</li>
-            <li><strong>Data source / technique drill-down</strong> — pick a data source or technique to see its components and detections.</li>
+            <li><strong>Component category / technique drill-down</strong> — pick a component category or technique to see its components and detections.</li>
           </ul>
           <p><strong>Capabilities:</strong> log-source multi-select with filter + "Select all visible", per-technique drill-down, smooth-fade re-renders. Diagrams scroll horizontally on phones.</p>
         </div>
@@ -341,10 +353,10 @@
       <div id="logSourcePicker" class="log-source-picker"></div>
       <div class="mermaid-host" id="diagramLogSourceCascade"></div>
 
-      <h3 class="diagram-h">Data source &rarr; components &rarr; techniques</h3>
+      <h3 class="diagram-h">Component category &rarr; components &rarr; techniques</h3>
       <div class="row">
-        <label>Data source
-          <select id="graphSourceSelect"><option value="">Select a data source…</option></select>
+        <label>Component category
+          <select id="graphSourceSelect"><option value="">Select a component category…</option></select>
         </label>
         <label>Max techniques per component
           <input type="number" id="graphMaxTech" min="1" max="100" value="20" />
@@ -363,7 +375,7 @@
       <div class="mermaid-host" id="diagramTechnique"></div>
 
       <h3 class="diagram-h">Coverage overview (top sources)</h3>
-      <p class="diagram-help">Top 12 data sources by total detections; bar shows your covered / total ratio.</p>
+      <p class="diagram-help">Top 12 component categories by total detections; bar shows your covered / total ratio.</p>
       <div class="mermaid-host" id="diagramOverview"></div>
     </section>
 
@@ -387,7 +399,7 @@
       </details>
       <div class="row">
         <label>Layer name <input type="text" id="layerName" value="Data source coverage" /></label>
-        <label>Description <input type="text" id="layerDesc" value="Detection coverage from data source inventory" /></label>
+        <label>Description <input type="text" id="layerDesc" value="Detection coverage from log source inventory" /></label>
       </div>
       <div class="row">
         <label>Min score colour <input type="color" id="colorMin" value="#ffe0b3" /></label>
@@ -402,6 +414,19 @@
     </section>
   </main>
 
+  <button id="helpLauncher" class="help-launcher" title="Open the 'How to use this tab' help for the current tab" aria-label="Show help for this tab">?</button>
+  <div id="tutorialOverlay" class="tutorial-overlay" hidden>
+    <div class="tutorial-card">
+      <div class="tutorial-step-label">Step <span id="tutorialStepNum">1</span> of <span id="tutorialStepTotal">5</span></div>
+      <h3 id="tutorialTitle">Title</h3>
+      <p id="tutorialBody">Body</p>
+      <div class="tutorial-actions">
+        <button id="tutorialSkip">Skip tour</button>
+        <button id="tutorialPrev">Back</button>
+        <button id="tutorialNext" class="primary">Next →</button>
+      </div>
+    </div>
+  </div>
   <footer>
     <small>Inspired by <a href="https://github.com/rabobank-cdc/DeTTECT" target="_blank" rel="noopener">DeTT&amp;CT</a> and <a href="https://github.com/siriussecurity/dettectinator" target="_blank" rel="noopener">Dettectinator</a>. Uses MITRE ATT&amp;CK&reg; data &mdash; &copy; The MITRE Corporation. ATT&amp;CK&reg; is a registered trademark of The MITRE Corporation.</small>
   </footer>
