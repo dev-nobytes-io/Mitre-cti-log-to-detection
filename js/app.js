@@ -44,6 +44,11 @@ const state = {
   // STIX component ids.
   customLsComponentRefs: new Set(),
   expanded: new Set(),
+  // chunk N: track whether the inventory tab has run its one-shot
+  // auto-expand pass. Auto-expand fires once per inventory replacement
+  // (boot, import, reset) to surface scored groups without an extra
+  // click; after that the user controls expansion.
+  inventoryAutoExpandDone: false,
   graph: {
     sourceId: "",
     techStixId: "",
@@ -59,6 +64,17 @@ const state = {
 
 const $ = sel => document.querySelector(sel);
 const $$ = sel => Array.from(document.querySelectorAll(sel));
+
+// Trailing-edge debounce. Used on the inventory filter input so we don't
+// rebuild every group's HTML on every keystroke when the bundle ships
+// hundreds of log-source channels.
+function debounce(fn, ms) {
+  let t = 0;
+  return (...args) => {
+    clearTimeout(t);
+    t = setTimeout(() => fn(...args), ms);
+  };
+}
 
 function setStatus(text, kind = "") {
   const el = $("#status");
@@ -222,7 +238,11 @@ function populateTacticFilter() {
 }
 
 // --- Inventory tab ---
-$("#dsFilter").addEventListener("input", e => { state.filters.ds = e.target.value.toLowerCase(); renderInventory(); });
+const renderInventoryDebounced = debounce(() => renderInventory(), 180);
+$("#dsFilter").addEventListener("input", e => {
+  state.filters.ds = e.target.value.toLowerCase();
+  renderInventoryDebounced();
+});
 $("#platformFilter").addEventListener("change", e => { state.filters.platform = e.target.value; renderInventory(); });
 $("#onlyScored")?.addEventListener("change", e => { state.filters.onlyScored = e.target.checked; renderInventory(); });
 document.querySelectorAll('input[name="inventoryGrouping"]').forEach(r => {
@@ -323,6 +343,8 @@ $("#setAllBtn").addEventListener("click", () => {
 $("#resetInventoryBtn").addEventListener("click", () => {
   if (!confirm("Reset the entire inventory?")) return;
   state.inventory = resetInventory();
+  state.expanded = new Set();
+  state.inventoryAutoExpandDone = false;
   refreshAll();
 });
 $("#inventoryFile").addEventListener("change", async ev => {
@@ -336,6 +358,10 @@ $("#inventoryFile").addEventListener("change", async ev => {
     }
     state.inventory = looksJson ? importJson(text) : importYaml(text);
     saveInventory(state.inventory);
+    // Re-arm the inventory auto-expand pass so the imported scored
+    // groups surface without an extra click.
+    state.expanded = new Set();
+    state.inventoryAutoExpandDone = false;
 
     // If ATT&CK isn't loaded yet, the rows can't be displayed. Auto-load the
     // bundled offline ATT&CK so the import is immediately visible — this is
@@ -499,8 +525,11 @@ function renderLogSourceInventory(root, compScores, lsScores) {
         </div>
         <div class="ds-meta">${ds.components.length} component${ds.components.length === 1 ? "" : "s"}</div>
         <div class="ds-meta">${lsTotal} feed${lsTotal === 1 ? "" : "s"}</div>
-      </div>
-      <div class="ds-components ${expanded ? "open" : ""}" data-components-for="${escapeAttr(ds.id)}">
+      </div>`;
+    // Lazy: skip the per-component inner rows when the group is collapsed.
+    if (!expanded) continue;
+    html += `
+      <div class="ds-components open" data-components-for="${escapeAttr(ds.id)}">
         ${ds.components.map(dc => {
           const compEff = compScores.get(dc.id);
           const compScore = compEff?.score ?? 0;
@@ -568,6 +597,17 @@ function renderLogSourceInventory(root, compScores, lsScores) {
 // new event codes without leaving the tab.
 function renderInventoryByName(root, lsScores) {
   const onlyScored = !!state.filters.onlyScored;
+  const filterText = (state.filters.ds || "").trim();
+  const filterPlatform = state.filters.platform || "";
+
+  // O(1) lookups for inventory entries — replaces the per-bundle-row
+  // .find() that turned the page into O(N×M) on big bundles.
+  const invByKey = new Map();
+  for (const e of state.inventory.log_sources || []) {
+    const k = ((e.name || "") + "|" + (e.channel || "")).toLowerCase();
+    invByKey.set(k, e);
+  }
+
   // Map<name, { rows: Array<{ id, channel, score, enabled, comment, isCustom, ls? }>, total, scored }>
   const groups = new Map();
   const ensure = (name) => {
@@ -577,10 +617,7 @@ function renderInventoryByName(root, lsScores) {
 
   // Add every bundle log source.
   for (const ls of state.attack.logSources || []) {
-    const entry = (state.inventory.log_sources || []).find(e =>
-      (e.name || "").toLowerCase() === (ls.name || "").toLowerCase() &&
-      (e.channel || "").toLowerCase() === (ls.channel || "").toLowerCase()
-    );
+    const entry = invByKey.get(((ls.name || "") + "|" + (ls.channel || "")).toLowerCase());
     const eff = lsScores.get(ls.id);
     const score = eff?.savedScore ?? 0;
     const enabled = entry ? entry.enabled !== false : true;
@@ -591,6 +628,7 @@ function renderInventoryByName(root, lsScores) {
       comment: entry?.comment || "",
       isCustom: false,
       componentCount: ls.componentIds?.length || 0,
+      platforms: ls.platforms || [],
     });
     g.total += 1;
     if (score > 0 && enabled) g.scored += 1;
@@ -613,6 +651,7 @@ function renderInventoryByName(root, lsScores) {
       comment: e.comment || "",
       isCustom: true,
       componentCount: 0,
+      platforms: [],
     });
     g.total += 1;
     if ((Number(e.score) || 0) > 0 && e.enabled !== false) g.scored += 1;
@@ -623,28 +662,72 @@ function renderInventoryByName(root, lsScores) {
     return;
   }
 
+  // Auto-expand groups that contain at least one scored row on the first
+  // render after fresh inventory data lands. Lets users see their
+  // scoring without an extra click after import — and keeps DOM-counting
+  // assertions (e.g. countScoredLogSourceRows) working when the rest of
+  // the page is rendered lazily.
+  if (!state.inventoryAutoExpandDone) {
+    let any = false;
+    for (const [name, g] of groups) {
+      if (g.scored > 0) { state.expanded.add(`name:${name}`); any = true; }
+    }
+    if (any || (state.inventory.log_sources || []).length > 0) {
+      state.inventoryAutoExpandDone = true;
+    }
+  }
+
+  // Per-row matcher for the search + platform filters. Custom rows have
+  // no platform metadata, so the platform filter never excludes them
+  // (otherwise users would lose visibility on their own entries).
+  const rowMatches = (r) => {
+    if (filterText) {
+      const hay = `${r.name || ""} ${r.channel || ""} ${r.comment || ""}`.toLowerCase();
+      if (!hay.includes(filterText)) return false;
+    }
+    if (filterPlatform && !r.isCustom) {
+      if (!r.platforms.includes(filterPlatform)) return false;
+    }
+    return true;
+  };
+
   // Sort group names alphabetically; sort rows within each group by channel.
   const sortedNames = Array.from(groups.keys()).sort((a, b) => a.localeCompare(b));
   let html = "";
+  let visibleGroups = 0;
   for (const name of sortedNames) {
     const g = groups.get(name);
     if (onlyScored && g.scored === 0) continue;
-    g.rows.sort((a, b) => (a.channel || "").localeCompare(b.channel || ""));
+    const visibleRows = g.rows.filter(rowMatches);
+    if ((filterText || filterPlatform) && visibleRows.length === 0) continue;
+    visibleRows.sort((a, b) => (a.channel || "").localeCompare(b.channel || ""));
+    visibleGroups += 1;
     const expandKey = `name:${name}`;
-    const expanded = state.expanded.has(expandKey);
-    const disabledCount = g.rows.filter(r => !r.enabled).length;
+    // When the user is actively filtering, force expansion so the matches
+    // are visible without an extra click per group.
+    const expanded = (filterText || filterPlatform) ? true : state.expanded.has(expandKey);
+    const disabledCount = visibleRows.filter(r => !r.enabled).length;
+    const customCount = visibleRows.filter(r => r.isCustom).length;
+    const totalShown = visibleRows.length;
+    const scoredShown = visibleRows.filter(r => r.score > 0 && r.enabled).length;
     html += `
       <div class="ds-row" data-ds-id="${escapeAttr(expandKey)}">
         <div class="toggle" data-toggle="${escapeAttr(expandKey)}">${expanded ? "▾" : "▸"}</div>
         <div>
           <div class="ds-name">${escapeHtml(name)}</div>
-          <div class="ds-meta">${g.scored} of ${g.total} channels scored${disabledCount ? ` · ${disabledCount} disabled` : ""}</div>
+          <div class="ds-meta">${scoredShown} of ${totalShown} channels scored${disabledCount ? ` · ${disabledCount} disabled` : ""}</div>
         </div>
-        <div class="ds-meta">${g.total} channel${g.total === 1 ? "" : "s"}</div>
-        <div class="ds-meta">${g.rows.filter(r => r.isCustom).length ? `${g.rows.filter(r => r.isCustom).length} custom` : ""}</div>
-      </div>
-      <div class="ds-components ${expanded ? "open" : ""}" data-components-for="${escapeAttr(expandKey)}">
-        ${g.rows.map(r => `
+        <div class="ds-meta">${totalShown} channel${totalShown === 1 ? "" : "s"}</div>
+        <div class="ds-meta">${customCount ? `${customCount} custom` : ""}</div>
+      </div>`;
+    // Lazy render: only emit the inner channel rows + add-channel form
+    // when the group is expanded. Collapsed groups stay cheap — a few
+    // hundred bundle log sources used to instantiate thousands of
+    // hidden DOM nodes (selects, checkboxes, forms) every render.
+    if (!expanded) continue;
+    html += `
+      <div class="ds-components open" data-components-for="${escapeAttr(expandKey)}">
+        ${visibleRows.map(r => `
           <div class="dc-row by-name-row${r.enabled ? "" : " parked"}" data-ls-row="${escapeAttr(r.id)}">
             <div>
               <div class="dc-name">${escapeHtml(r.channel || "(no channel)")}${r.isCustom ? ' <span style="color:var(--muted);font-weight:400">(custom)</span>' : ""}</div>
@@ -675,7 +758,11 @@ function renderInventoryByName(root, lsScores) {
       </div>
     `;
   }
-  root.innerHTML = html || `<div style="padding:20px;color:var(--muted)">No groups match your filter.</div>`;
+  if (visibleGroups === 0) {
+    root.innerHTML = `<div style="padding:20px;color:var(--muted)">No groups match your filter.</div>`;
+    return;
+  }
+  root.innerHTML = html;
 
   // Wire interactions
   root.querySelectorAll("[data-toggle]").forEach(el => {
@@ -1649,6 +1736,8 @@ $("#runSampleAssessment")?.addEventListener("click", async () => {
     ]);
     state.inventory = importYaml(invText);
     saveInventory(state.inventory);
+    state.expanded = new Set();
+    state.inventoryAutoExpandDone = false;
     state.threats = importThreatsYaml(threatsText);
     saveThreats(state.threats);
     refreshAll();
