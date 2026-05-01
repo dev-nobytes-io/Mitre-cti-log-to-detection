@@ -387,6 +387,30 @@ button.danger { color: var(--bad); border-color: var(--bad); }
 
 /* chunk 14: strategy-card expansion + per-channel toggles */
 .strategy-card.parked { opacity: 0.6; }
+/* chunk 17: manually-claimed coverage visual — distinct from chain-lit */
+.strategy-card.manual {
+  background: rgba(63, 185, 80, 0.06);
+  border-left: 3px dotted #3fb950;
+}
+.strategy-card.manual.lit { border-left-style: dotted; }
+.strat-toggles { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.manual-cover-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  border: 1px dashed var(--border);
+  border-radius: 3px;
+}
+.manual-cover-toggle:has(input:checked) {
+  color: #3fb950;
+  border-color: #3fb950;
+  background: rgba(63, 185, 80, 0.08);
+}
+.manual-cover-toggle input { margin: 0; }
 .strat-expansion .strat-an-block {
   margin-bottom: 8px;
   padding: 6px 8px;

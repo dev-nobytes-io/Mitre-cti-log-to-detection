@@ -5,6 +5,7 @@ import {
   effectiveLogSourceScores, setLogSourceScore, setAllLogSources, removeLogSource,
   setLogSourceEnabled, setLogSourceComponentRefs,
   setStrategyEnabled, isStrategyEnabled,
+  setStrategyManuallyCovered, isStrategyManuallyCovered,
   setRiskAccepted, isRiskAccepted, logSourceRiskKey,
   exportYaml, importYaml, exportJson, importJson,
 } from "./inventory.js";
@@ -879,6 +880,7 @@ function runCoverage() {
       analyticAggregation: state.filters.analyticAggregation || "min",
       riskAccepted: state.inventory.risk_accepted || null,
       disabledStrategies: state.inventory.disabled_strategies || null,
+      manuallyCoveredStrategies: state.inventory.manually_covered_strategies || null,
     },
   );
 }
@@ -925,6 +927,7 @@ function renderDetectionStrategies(coverage) {
   let html = "";
   for (const st of strategies) {
     const stratEnabled = isStrategyEnabled(state.inventory, st.id);
+    const stratManual = isStrategyManuallyCovered(state.inventory, st.id);
     const ans = (st.analyticIds || []).map(id => state.attack.analyticById?.get(id)).filter(Boolean);
     const litAns = [];
     let logSourceCount = 0;
@@ -941,24 +944,38 @@ function renderDetectionStrategies(coverage) {
       analyticDetail.push({ id: a.id, name: a.name, lit: aLit, score: aScore, lsList });
       if (aLit) litAns.push({ id: a.id, name: a.name, score: aScore });
     }
-    const lit = stratEnabled && litAns.length > 0;
-    const score = lit ? Math.max(...litAns.map(a => a.score)) : 0;
+    const chainLit = stratEnabled && litAns.length > 0;
+    const lit = chainLit || (stratEnabled && stratManual);
+    let score = 0;
+    if (chainLit && stratManual) score = Math.max(5, ...litAns.map(a => a.score));
+    else if (chainLit) score = Math.max(...litAns.map(a => a.score));
+    else if (stratManual) score = 5;
     const detectedTechIds = techniqueByStratId.get(st.id) || new Set();
     const detectedCount = detectedTechIds.size || (st.techniqueIds?.length || 0);
     const expanded = state.expanded.has(`strat:${st.id}`);
     const cardCls = lit ? " lit" : (stratEnabled ? "" : " parked");
+    const manualCls = stratManual && stratEnabled ? " manual" : "";
+    const statusBits = [];
+    if (!stratEnabled) statusBits.push("<strong>parked</strong>");
+    if (stratManual && stratEnabled) statusBits.push('<strong style="color:#3fb950">✓ manually covered</strong>');
+    if (chainLit && !stratManual) statusBits.push("chain-lit");
+    const statusSuffix = statusBits.length ? ` · ${statusBits.join(" · ")}` : "";
     html += `
-      <div class="ds-row strategy-card${cardCls}" data-strat-id="${escapeAttr(st.id)}">
+      <div class="ds-row strategy-card${cardCls}${manualCls}" data-strat-id="${escapeAttr(st.id)}">
         <div class="strat-toggle" data-strat-toggle="${escapeAttr(st.id)}" style="cursor:pointer;color:var(--muted)">${expanded ? "▾" : "▸"}</div>
         <div>
           <div class="ds-name">${escapeHtml(st.name)} <span style="color:var(--muted);font-weight:400">${escapeHtml(st.attackId || "")}</span></div>
-          <div class="ds-meta">${ans.length} analytic${ans.length === 1 ? "" : "s"} · ${logSourceCount} log-source ref${logSourceCount === 1 ? "" : "s"} · ${detectedCount} technique${detectedCount === 1 ? "" : "s"} detected${stratEnabled ? "" : " · <strong>parked</strong>"}</div>
+          <div class="ds-meta">${ans.length} analytic${ans.length === 1 ? "" : "s"} · ${logSourceCount} log-source ref${logSourceCount === 1 ? "" : "s"} · ${detectedCount} technique${detectedCount === 1 ? "" : "s"} detected${statusSuffix}</div>
         </div>
-        <div class="ds-meta">
+        <div class="ds-meta strat-toggles">
           ${litAns.length}/${ans.length} analytics lit
-          <label class="enable-toggle" style="margin-left:8px">
+          <label class="enable-toggle" title="Park / unpark this strategy. Parked strategies don't count toward coverage even if you've claimed coverage.">
             <input type="checkbox" data-strat-enable="${escapeAttr(st.id)}" ${stratEnabled ? "checked" : ""} />
             <span>${stratEnabled ? "enabled" : "parked"}</span>
+          </label>
+          <label class="manual-cover-toggle" title="Claim manual coverage for this strategy. Use when you have a SIEM rule / EDR detection / etc. for it even if the bundle's analytic spec wouldn't auto-light from your log scores.">
+            <input type="checkbox" data-strat-manual="${escapeAttr(st.id)}" ${stratManual ? "checked" : ""} />
+            <span>covered</span>
           </label>
         </div>
         <div><span class="score-badge s${Math.round(score)}">${lit ? score.toFixed(1) : "○"}</span></div>
@@ -981,6 +998,14 @@ function renderDetectionStrategies(coverage) {
     box.addEventListener("change", () => {
       const id = box.getAttribute("data-strat-enable");
       setStrategyEnabled(state.inventory, id, box.checked);
+      saveInventory(state.inventory);
+      refreshAll();
+    });
+  });
+  root.querySelectorAll("input[data-strat-manual]").forEach(box => {
+    box.addEventListener("change", () => {
+      const id = box.getAttribute("data-strat-manual");
+      setStrategyManuallyCovered(state.inventory, id, box.checked);
       saveInventory(state.inventory);
       refreshAll();
     });
@@ -1058,12 +1083,16 @@ function renderCoverage() {
 
   const v2 = cov.engine === "v2";
   const detectableSub = v2 ? "have detection strategies" : "have data-component detections";
+  // chunk 17: count manually-covered strategies as a separate signal
+  // so users see how much of their coverage is "claimed" vs "chain-lit".
+  const manualCount = Object.keys(state.inventory.manually_covered_strategies || {}).length;
   stats.innerHTML = `
     <div class="stat-card"><div class="label">Techniques (total)</div><div class="value">${cov.summary.total}</div></div>
     <div class="stat-card"><div class="label">Detectable</div><div class="value">${cov.summary.detectable}</div><div class="sub">${detectableSub}</div></div>
     <div class="stat-card"><div class="label">Covered</div><div class="value">${cov.summary.covered}</div><div class="sub">${pct(cov.summary.covered / Math.max(cov.summary.detectable,1))} of detectable</div></div>
     <div class="stat-card"><div class="label">Fully covered</div><div class="value">${cov.summary.fully}</div></div>
     <div class="stat-card"><div class="label">Partial</div><div class="value">${cov.summary.partial}</div></div>
+    <div class="stat-card"><div class="label">Manually covered</div><div class="value">${manualCount}</div><div class="sub">strategies claimed</div></div>
     <div class="stat-card"><div class="label">Risk accepted</div><div class="value">${cov.summary.riskAccepted || 0}</div><div class="sub">acknowledged gaps</div></div>
     <div class="stat-card"><div class="label">Avg score (covered)</div><div class="value">${cov.summary.avgScore.toFixed(2)}</div></div>
   `;

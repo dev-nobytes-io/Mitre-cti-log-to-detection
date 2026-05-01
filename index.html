@@ -212,13 +212,15 @@
           <p><strong>What it does:</strong> shows every <code>x-mitre-detection-strategy</code> in the loaded bundle and the techniques they unlock. A strategy is "lit" iff at least one of its analytics is lit; an analytic is "lit" iff every required log source has score &gt; 0.</p>
           <p><strong>Steps:</strong></p>
           <ol>
-            <li>Read the strategy summary cards at the top — green border = lit, dim = unlit. Each card lists the analytics it bundles, how many log sources are required, and how many techniques it detects.</li>
+            <li>Read the strategy summary cards at the top — green border = chain-lit, green dotted border = manually claimed coverage, dim = unlit. Each card lists the analytics it bundles, how many log sources are required, and how many techniques it detects.</li>
+            <li><strong>"covered" checkbox per strategy</strong> — if your SIEM / EDR has a detection in place for this strategy even though the bundle's analytic spec wouldn't auto-light from your log scores, tick it to claim manual coverage. Useful for "we have a custom Splunk rule that catches this even though the analytic wants log sources we don't ship." Lights the strategy at score 5.</li>
+            <li><strong>"enabled" checkbox per strategy</strong> — park a strategy you don't intend to run; it's hidden from coverage entirely (overrides any "covered" claim).</li>
             <li>Pick the <strong>Analytic score</strong> aggregator: <em>min</em> = strict (a chain is only as strong as its weakest log source); <em>avg</em> = lenient.</li>
             <li>Scroll to the technique table — score / coverage ratio / lit/partial badges per technique. Filter by tactic or coverage class.</li>
             <li>Click <strong>✓</strong> on any technique row to mark it <em>risk accepted</em> (acknowledged gap). It moves out of <em>Uncovered</em> and into the <em>Risk accepted</em> bucket.</li>
             <li>Use <em>Download detections Navigator layer</em> to export a heatmap.</li>
           </ol>
-          <p><strong>Capabilities:</strong> tactic + coverage filters, min/avg aggregator toggle, per-technique risk-accept toggle, Navigator layer export.</p>
+          <p><strong>Capabilities:</strong> tactic + coverage filters, min/avg aggregator toggle, per-strategy park / claim-coverage toggles, per-technique risk-accept toggle, Navigator layer export.</p>
         </div>
       </details>
       <div class="stats" id="coverageStats"></div>

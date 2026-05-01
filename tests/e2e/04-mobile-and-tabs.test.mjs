@@ -317,6 +317,64 @@ test("Run sample assessment + persistent help launcher + guided tour (chunk 16)"
   await page.context().close();
 });
 
+test("Strategy 'covered' checkbox claims manual coverage independent of the chain (chunk 17)", async () => {
+  // chunk 17: directly addresses the user-reported "0 coverage no
+  // matter what I do" frustration. Even with no log sources scored,
+  // ticking a strategy's "covered" checkbox should:
+  //   - light the card (green dotted border)
+  //   - bump the Coverage tab "Manually covered" stat
+  //   - light at least one technique that the strategy detects (the
+  //     manual claim contributes to the technique's lit count and
+  //     weighted score 5).
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  // Reset inventory so we start with zero coverage.
+  await activateTab(page, "inventory");
+  await page.click("#resetInventoryBtn");
+  await page.waitForTimeout(150);
+
+  await activateTab(page, "coverage");
+
+  // Baseline: 0 manually covered, 0 covered techniques (unless legacy
+  // path lights anything — but with no inventory it shouldn't).
+  const baseline = await page.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll("#coverageStats .stat-card"));
+    const get = (label) => Number(cards.find(c => c.querySelector(".label")?.textContent?.includes(label))?.querySelector(".value")?.textContent || "0");
+    return { manual: get("Manually covered"), covered: get("Covered"), litCards: document.querySelectorAll("#strategySummary .strategy-card.lit").length };
+  });
+  assert.equal(baseline.manual, 0, `expected 0 manually-covered to start, got ${baseline.manual}`);
+
+  // Tick the first strategy's "covered" checkbox.
+  const firstId = await page.evaluate(() => {
+    const cb = document.querySelector("#strategySummary input[data-strat-manual]");
+    if (!cb) return null;
+    const id = cb.getAttribute("data-strat-manual");
+    cb.checked = true;
+    cb.dispatchEvent(new Event("change", { bubbles: true }));
+    return id;
+  });
+  assert.ok(firstId, "expected a strategy with a 'covered' checkbox");
+  await page.waitForTimeout(200);
+
+  const after = await page.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll("#coverageStats .stat-card"));
+    const get = (label) => Number(cards.find(c => c.querySelector(".label")?.textContent?.includes(label))?.querySelector(".value")?.textContent || "0");
+    const card = document.querySelector("#strategySummary input[data-strat-manual]:checked")?.closest(".strategy-card");
+    return {
+      manual: get("Manually covered"),
+      covered: get("Covered"),
+      cardLit: card?.classList.contains("lit"),
+      cardManualCls: card?.classList.contains("manual"),
+    };
+  });
+  assert.equal(after.manual, 1, `expected manually-covered count to bump to 1, got ${after.manual}`);
+  assert.ok(after.cardLit, "claimed strategy card should now have .lit");
+  assert.ok(after.cardManualCls, "claimed strategy card should have .manual styling");
+  assert.ok(after.covered > baseline.covered, `expected the 'Covered' stat to rise after manual claim, got ${baseline.covered} -> ${after.covered}`);
+
+  await page.context().close();
+});
+
 test("desktop layout still works (no mobile dropdown shown)", async () => {
   const page = await newPage({ viewport: { width: 1280, height: 900 }, blockExternal: true });
   await bootApp(page);
