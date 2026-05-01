@@ -620,7 +620,11 @@ function renderInventoryByName(root, lsScores) {
     const entry = invByKey.get(((ls.name || "") + "|" + (ls.channel || "")).toLowerCase());
     const eff = lsScores.get(ls.id);
     const score = eff?.savedScore ?? 0;
-    const enabled = entry ? entry.enabled !== false : true;
+    // Default unselected: a bundle log source with no inventory entry is
+    // "I haven't onboarded this" — the row renders unticked / parked
+    // until the user explicitly opts in (ticks the checkbox or sets a
+    // score, both of which create an entry with enabled=true).
+    const enabled = !!entry && entry.enabled !== false;
     const g = ensure(ls.name || "(unnamed)");
     g.rows.push({
       id: ls.id, name: ls.name, channel: ls.channel,
@@ -1133,7 +1137,13 @@ function renderStrategyExpansion(strat, analyticDetail, detectedTechIds) {
                 <span style="color:var(--muted)">/ ${escapeHtml(ls.channel || "")}</span>
                 <span class="score-badge s${ls.score}">${ls.score}</span>
                 <label class="enable-toggle" style="margin-left:auto">
-                  <input type="checkbox" data-ls-enable-strat="${escapeAttr(`${ls.name || ""}||${ls.channel || ""}`)}" ${state.inventory.log_sources?.find(e => (e.name||"").toLowerCase() === (ls.name||"").toLowerCase() && (e.channel||"").toLowerCase() === (ls.channel||"").toLowerCase())?.enabled === false ? "" : "checked"} />
+                  <input type="checkbox" data-ls-enable-strat="${escapeAttr(`${ls.name || ""}||${ls.channel || ""}`)}" ${(() => {
+                    const e = state.inventory.log_sources?.find(x => (x.name||"").toLowerCase() === (ls.name||"").toLowerCase() && (x.channel||"").toLowerCase() === (ls.channel||"").toLowerCase());
+                    // Default unselected: only checked when there's an explicit
+                    // inventory entry that isn't parked. Matches the inventory
+                    // tab — every channel starts as "I haven't onboarded this".
+                    return e && e.enabled !== false ? "checked" : "";
+                  })()} />
                   <span>park</span>
                 </label>
               </div>`).join("")}
