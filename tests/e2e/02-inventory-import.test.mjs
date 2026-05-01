@@ -66,6 +66,11 @@ test("manual entry: typing a custom log source persists, drives coverage if it m
   await bootApp(page);
   await activateTab(page, "inventory");
 
+  // chunk 18: picker is the default view; switch to by-name so the
+  // existing winlogbeat-group assertions still locate their target.
+  await page.click('input[name="inventoryGrouping"][value="name"]');
+  await page.waitForTimeout(120);
+
   // Open the form (it's a <details> closed by default).
   await page.click("#customLsForm summary");
 
@@ -172,6 +177,64 @@ test("manual entry → component map: a custom log source mapped to a component 
   await page.context().close();
 });
 
+test("Inventory picker view + activation strip + bulk enable (chunk 18)", async () => {
+  // chunk 18: the Log Inventory tab now opens on the picker view by
+  // default (flat list, one row per channel, with bulk enable). The
+  // activation strip shows live cascade counts. After ticking one
+  // row, the strip should bump from 0 → 1 enabled and at least one
+  // component should activate.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  await activateTab(page, "inventory");
+
+  const defaults = await page.evaluate(() => ({
+    pickerActive: document.querySelector('input[name="inventoryGrouping"][value="picker"]')?.checked,
+    pickerControlsVisible: !document.querySelector("#inventoryPickerControls")?.hidden,
+    stripExists: !!document.querySelector("#inventoryActivationStrip"),
+  }));
+  assert.equal(defaults.pickerActive, true, "default grouping should be 'picker'");
+  assert.equal(defaults.pickerControlsVisible, true, "picker controls (filter + bulk buttons) should be visible");
+  assert.equal(defaults.stripExists, true, "activation strip container should exist");
+
+  // Strip baseline (no inventory imported, fresh load — though
+  // chunk 16 may have left some localStorage from prior tests; assert
+  // we read the cells without crashing).
+  const baseline = await page.evaluate(() => ({
+    cells: Array.from(document.querySelectorAll("#inventoryActivationStrip .strip-cell strong")).map(s => Number(s.textContent || "0")),
+  }));
+  assert.equal(baseline.cells.length, 4, `expected 4 strip cells, got ${baseline.cells.length}`);
+
+  // Enable the first picker row + score it 5; the score select
+  // appears AFTER the enable checkbox is ticked because the row
+  // re-renders, so we have to re-query.
+  const targetKey = await page.evaluate(() => {
+    const cb = document.querySelector('#inventoryTable input[data-pick-enable]');
+    if (!cb) return null;
+    cb.checked = true;
+    cb.dispatchEvent(new Event("change", { bubbles: true }));
+    return cb.dataset.pickEnable;
+  });
+  assert.ok(targetKey, "picker should expose at least one enable checkbox");
+  await page.waitForTimeout(150);
+
+  await page.evaluate((key) => {
+    const sel = document.querySelector(`#inventoryTable select[data-kind='ls'][data-key="${key}"]`);
+    if (sel) { sel.value = "5"; sel.dispatchEvent(new Event("change", { bubbles: true })); }
+  }, targetKey);
+  await page.waitForTimeout(150);
+
+  const after = await page.evaluate(() => ({
+    cells: Array.from(document.querySelectorAll("#inventoryActivationStrip .strip-cell strong")).map(s => Number(s.textContent || "0")),
+    pickerCount: document.querySelector("#invPickerCount")?.textContent || "",
+  }));
+  // At least one log source enabled, at least one component activated.
+  assert.ok(after.cells[0] >= 1, `expected log-sources-enabled to be >=1 after toggle + score, got ${after.cells[0]}`);
+  assert.ok(after.cells[1] >= 1, `expected components-activated to be >=1, got ${after.cells[1]}`);
+  assert.match(after.pickerCount, /\d+ enabled/, `picker count chip should report enabled count, got: ${after.pickerCount}`);
+
+  await page.context().close();
+});
+
 test("Data Components tab highlights covered rows + expansion lists log sources feeding each component", async () => {
   // chunk 12: visible bug repro — after importing inventory.example.yaml,
   // the Components tab must (a) colour-code rows by score (covered/
@@ -239,9 +302,11 @@ test("by-name view: groups every channel under its log-source name and the enabl
   await importInventory(page, "inventory.example.yaml");
   await page.waitForTimeout(150);
 
-  // Confirm by-name is the default mode.
+  // chunk 18: switch to the by-name view (picker is now the default).
+  await page.click('input[name="inventoryGrouping"][value="name"]');
+  await page.waitForTimeout(120);
   const grouping = await page.evaluate(() => document.querySelector('input[name="inventoryGrouping"][value="name"]')?.checked);
-  assert.equal(grouping, true, "default grouping should be 'name'");
+  assert.equal(grouping, true, "by-name grouping should be active after click");
 
   // Expand the sysmon banner.
   await page.evaluate(() => {
@@ -290,6 +355,9 @@ test("by-name view: + Add channel inline form scores a new event code under the 
   const page = await newPage({ blockExternal: true });
   await bootApp(page);
   await activateTab(page, "inventory");
+  // chunk 18: switch to by-name; picker is now default.
+  await page.click('input[name="inventoryGrouping"][value="name"]');
+  await page.waitForTimeout(120);
 
   // Expand the sysmon group (will be empty of saved entries on a fresh load).
   await page.evaluate(() => document.querySelector('[data-toggle="name:sysmon"]')?.click());
@@ -343,6 +411,11 @@ test("v2: importing inventory.example.yaml exposes scored log_sources block", as
   assert.ok(lsScored, `summary missing 'log sources scored', got: ${JSON.stringify(summary)}`);
   const [lsN] = lsScored.split("/").map(s => Number(s.trim()));
   assert.ok(lsN >= 5, `expected >=5 explicitly-scored log sources, got ${lsN}`);
+
+  // chunk 18: picker is the default view; switch to by-name so the
+  // nested-toggle expansion logic this test relies on still works.
+  await page.click('input[name="inventoryGrouping"][value="name"]');
+  await page.waitForTimeout(120);
 
   // Expand every parent so the nested log-source selects are in the DOM.
   await page.evaluate(() => {
