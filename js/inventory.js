@@ -293,9 +293,16 @@ export function setAllSources(inv, attack, score) {
 // caller record which data components a custom tuple feeds — chunk 13
 // uses this so manual entries can drive coverage even when the (name,
 // channel) doesn't match a known bundle log source.
+//
+// chunk 19: default-off — a brand-new entry with score > 0 is enabled
+// (the user clearly intends to use it); a brand-new entry with score 0
+// is disabled by default. Existing entries' `enabled` flag is
+// untouched unless `opts.enable === true` is passed (e.g. from the
+// picker view's "enable + score in one click" flow).
 export function setLogSourceScore(inv, name, channel, score, opts = {}) {
   if (!Array.isArray(inv.log_sources)) inv.log_sources = [];
   const key = lsKey(name, channel);
+  const clamped = clampScore(score);
   let entry = inv.log_sources.find(e => lsKey(e.name, e.channel) === key);
   if (!entry) {
     entry = {
@@ -303,16 +310,17 @@ export function setLogSourceScore(inv, name, channel, score, opts = {}) {
       channel: channel || "",
       applicable_to: ["all"],
       date_connected: today(),
-      score: clampScore(score),
-      enabled: true,
+      score: clamped,
+      enabled: opts.enable === true ? true : clamped > 0,
       comment: opts.comment || "",
       component_refs: Array.isArray(opts.componentRefs) ? [...opts.componentRefs] : [],
     };
     inv.log_sources.push(entry);
   } else {
-    entry.score = clampScore(score);
+    entry.score = clamped;
     if (opts.comment !== undefined) entry.comment = opts.comment;
-    if (entry.enabled === undefined) entry.enabled = true;
+    if (entry.enabled === undefined) entry.enabled = clamped > 0;
+    if (opts.enable === true) entry.enabled = true;
     if (!entry.date_connected) entry.date_connected = today();
     if (Array.isArray(opts.componentRefs)) entry.component_refs = [...opts.componentRefs];
   }
@@ -511,16 +519,25 @@ function importDoc(doc) {
     })).filter(e => e.data_source_name);
   }
   if (Array.isArray(doc.log_sources)) {
-    inv.log_sources = doc.log_sources.map(e => ({
-      name: e.name || "",
-      channel: e.channel != null ? String(e.channel) : "",
-      applicable_to: e.applicable_to || ["all"],
-      date_connected: e.date_connected || today(),
-      score: clampScore(e.score),
-      enabled: e.enabled !== false,
-      comment: e.comment || "",
-      component_refs: Array.isArray(e.component_refs) ? e.component_refs.filter(x => typeof x === "string") : [],
-    })).filter(e => e.name || e.channel);
+    inv.log_sources = doc.log_sources.map(e => {
+      const score = clampScore(e.score);
+      // chunk 19: default-off semantics. If `enabled` is explicitly
+      // set, honour it. Otherwise infer: a row with score > 0 is
+      // assumed enabled (preserves persona / DeTT&CT-import behaviour
+      // — users who scored a row clearly meant to enable it). Rows
+      // without an explicit score and no `enabled` flag default off.
+      const enabled = (e.enabled !== undefined) ? (e.enabled !== false) : (score > 0);
+      return {
+        name: e.name || "",
+        channel: e.channel != null ? String(e.channel) : "",
+        applicable_to: e.applicable_to || ["all"],
+        date_connected: e.date_connected || today(),
+        score,
+        enabled,
+        comment: e.comment || "",
+        component_refs: Array.isArray(e.component_refs) ? e.component_refs.filter(x => typeof x === "string") : [],
+      };
+    }).filter(e => e.name || e.channel);
   }
   if (doc.risk_accepted && typeof doc.risk_accepted === "object") {
     inv.risk_accepted = {
