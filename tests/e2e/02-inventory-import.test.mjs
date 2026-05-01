@@ -170,6 +170,51 @@ test("manual entry → component map: a custom log source mapped to a component 
   await page.context().close();
 });
 
+test("default-off: a fresh inventory shows zero coverage; personas with scores still light up via implicit-enable (chunk 19)", async () => {
+  // chunk 19: every log source ships disabled by default. Without a
+  // saved inventory entry (or with `enabled: false`), a log source
+  // contributes 0 to coverage. Existing personas +
+  // inventory.example.yaml omit the `enabled:` field but ship
+  // `score > 0` rows; the importer infers enabled = true from score
+  // so they continue working.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  await activateTab(page, "inventory");
+
+  // Reset inventory to baseline.
+  await page.click("#resetInventoryBtn");
+  await page.waitForTimeout(150);
+
+  // Summary pills should report 0 log sources scored on a fresh
+  // inventory (default-off).
+  const baseline = await page.evaluate(() => {
+    const pills = Array.from(document.querySelectorAll("#inventorySummary .pill strong")).map(s => s.textContent || "");
+    // pill 0: "X / Y log sources scored"; pill 1: "X / Y data components covered"
+    const lsScored = Number((pills[0] || "0").split("/")[0].trim());
+    const compsCovered = Number((pills[1] || "0").split("/")[0].trim());
+    return { lsScored, compsCovered };
+  });
+  assert.equal(baseline.lsScored, 0, `default-off: expected 0 log sources scored on a fresh inventory, got ${baseline.lsScored}`);
+  assert.equal(baseline.compsCovered, 0, `default-off: expected 0 components covered, got ${baseline.compsCovered}`);
+
+  // Importing the example (which has `score:` but no `enabled:`
+  // fields) should still light things up because the importer infers
+  // enabled from score.
+  await importInventory(page, "inventory.example.yaml");
+  await page.waitForTimeout(150);
+  const after = await page.evaluate(() => {
+    const pills = Array.from(document.querySelectorAll("#inventorySummary .pill strong")).map(s => s.textContent || "");
+    const lsScored = Number((pills[0] || "0").split("/")[0].trim());
+    const compsCovered = Number((pills[1] || "0").split("/")[0].trim());
+    return { lsScored, compsCovered };
+  });
+  assert.ok(after.lsScored >= 5, `expected the imported example to enable >=5 log sources, got ${after.lsScored}`);
+  assert.ok(after.compsCovered >= 1, `expected at least one component covered by the imported example, got ${after.compsCovered}`);
+
+  await page.context().close();
+});
+
+
 test("Data Components tab highlights covered rows + expansion lists log sources feeding each component", async () => {
   // chunk 12: visible bug repro — after importing inventory.example.yaml,
   // the Components tab must (a) colour-code rows by score (covered/
