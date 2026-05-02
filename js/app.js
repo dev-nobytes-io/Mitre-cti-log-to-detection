@@ -9,7 +9,7 @@ import {
   setRiskAccepted, isRiskAccepted, logSourceRiskKey,
   exportYaml, importYaml, exportJson, importJson,
 } from "./inventory.js";
-import { computeCoverage } from "./coverage.js";
+import { computeCoverage, inclusiveAnalyticStrategyState, detectedTechniquesFromState } from "./coverage.js";
 import { buildNavigatorLayer } from "./navigator.js";
 import { conceptualDiagram, sourceDiagram, techniqueDiagram, overviewDiagram, logSourceCascadeDiagram } from "./diagrams.js";
 import {
@@ -309,6 +309,21 @@ $("#mergedInvFilter")?.addEventListener("input", e => {
 // mermaid cost on every score change for users who never open it.
 $("#inventoryDiagram")?.addEventListener("toggle", () => renderInventoryDiagramV2());
 
+// Refactor-merge chunk 5: "Ignore incomplete analytics" toggle.
+// Persists to localStorage so the user's preference round-trips.
+// Affects display (hides .partial rows in the merged tab) AND
+// computation (runCoverage flips partialStrategiesLit), so the
+// Coverage tab's numbers move in lockstep with the toggle.
+const ignoreIncompleteCb = $("#mergedInvIgnoreIncomplete");
+if (ignoreIncompleteCb) {
+  ignoreIncompleteCb.checked = readIgnoreIncompleteFlag();
+  ignoreIncompleteCb.addEventListener("change", () => {
+    writeIgnoreIncompleteFlag(ignoreIncompleteCb.checked);
+    refreshAll();
+    scheduleInventoryDiagramRender();
+  });
+}
+
 let _inventoryDiagramTimer = null;
 function scheduleInventoryDiagramRender() {
   if (_inventoryDiagramTimer) clearTimeout(_inventoryDiagramTimer);
@@ -521,6 +536,99 @@ function renderInventory() {
 }
 
 // chunk N: merged Data-Component → Log-Source → Channel hierarchy. Each
+// Refactor-merge chunk 5: render the analytics + strategies +
+// detected-TTPs sections of the merged tab. Inclusive by default —
+// any analytic with ≥1 required channel scored shows up; analytics
+// missing some required channels render greyed (.partial). Same for
+// strategies. The "Ignore incomplete" toggle hides .partial rows
+// and (via runCoverage) reverts the Coverage tab to strict counts.
+function renderInventoryAnalyticsAndStrategies() {
+  if (!state.attack) return;
+  const ignoreIncomplete = readIgnoreIncompleteFlag();
+  const lsScores = effectiveLogSourceScores(state.inventory, state.attack);
+  const incl = inclusiveAnalyticStrategyState(state.attack, lsScores);
+
+  const anRoot = $("#inventoryAnalytics");
+  if (anRoot) {
+    let html = "";
+    let visible = 0;
+    const sorted = (state.attack.analytics || []).slice().sort((a, b) => {
+      const sa = incl.analytic.get(a.id)?.state, sb = incl.analytic.get(b.id)?.state;
+      const order = { fullyMet: 0, partial: 1, none: 2 };
+      return (order[sa] ?? 3) - (order[sb] ?? 3) || (a.name || "").localeCompare(b.name || "");
+    });
+    for (const an of sorted) {
+      const s = incl.analytic.get(an.id);
+      if (!s || s.state === "none") continue;
+      if (ignoreIncomplete && s.state === "partial") continue;
+      visible++;
+      const cls = s.state === "fullyMet" ? "lit" : "partial";
+      html += `<div class="ds-row analytic-row ${cls}">
+        <div></div>
+        <div>
+          <div class="ds-name">${escapeHtml(an.name || an.id)}</div>
+          <div class="ds-meta">${s.litCount}/${s.totalCount} required log sources scored · ${s.state === "fullyMet" ? "fully met" : "partial"}</div>
+        </div>
+        <div class="ds-meta">${s.state === "fullyMet" ? "lit" : "incomplete"}</div>
+        <div></div>
+      </div>`;
+    }
+    anRoot.innerHTML = visible
+      ? html
+      : `<div style="padding:20px;color:var(--muted)">${ignoreIncomplete ? "No fully-met analytics yet — score every required channel of at least one analytic." : "Score at least one channel to populate."}</div>`;
+  }
+
+  const stRoot = $("#inventoryStrategies");
+  if (stRoot) {
+    let html = "";
+    let visible = 0;
+    const sorted = (state.attack.detectionStrategies || []).slice().sort((a, b) => {
+      const sa = incl.strategy.get(a.id)?.state, sb = incl.strategy.get(b.id)?.state;
+      const order = { active: 0, partial: 1, none: 2 };
+      return (order[sa] ?? 3) - (order[sb] ?? 3) || (a.name || "").localeCompare(b.name || "");
+    });
+    for (const st of sorted) {
+      const s = incl.strategy.get(st.id);
+      if (!s || s.state === "none") continue;
+      if (ignoreIncomplete && s.state === "partial") continue;
+      visible++;
+      const cls = s.state === "active" ? "lit" : "partial";
+      const techCount = (st.techniqueIds || []).length;
+      html += `<div class="ds-row strategy-card ${cls}">
+        <div></div>
+        <div>
+          <div class="ds-name">${escapeHtml(st.name)} <span style="color:var(--muted);font-weight:400">${escapeHtml(st.attackId || "")}</span></div>
+          <div class="ds-meta">${s.fullyMet.length} fully-met · ${s.partial.length} partial · detects ${techCount} technique${techCount === 1 ? "" : "s"}</div>
+        </div>
+        <div class="ds-meta">${s.state === "active" ? "active" : "incomplete"}</div>
+        <div></div>
+      </div>`;
+    }
+    stRoot.innerHTML = visible
+      ? html
+      : `<div style="padding:20px;color:var(--muted)">${ignoreIncomplete ? "No active strategies yet — fully meet an analytic above." : "Strategies populate automatically once an analytic has any active channel."}</div>`;
+  }
+
+  const ttpsRoot = $("#detectedTtps");
+  if (ttpsRoot) {
+    const detectedIds = detectedTechniquesFromState(state.attack, incl, { inclusive: !ignoreIncomplete });
+    if (detectedIds.size === 0) {
+      ttpsRoot.innerHTML = `<div style="padding:20px;color:var(--muted)">No active detection strategies yet.</div>`;
+    } else {
+      const techs = [];
+      for (const tid of detectedIds) {
+        const t = state.attack.techniqueById?.get(tid);
+        if (t) techs.push(t);
+      }
+      techs.sort((a, b) => (a.attackId || "").localeCompare(b.attackId || ""));
+      ttpsRoot.innerHTML = `<p style="color:var(--muted);font-size:12px">Union of techniques detected by the strategies above${ignoreIncomplete ? " (active only)" : " (active + partial)"}.</p>` +
+        `<div class="ttp-chips">` +
+        techs.map(t => `<span class="ttp-chip">${escapeHtml(t.attackId)} <span style="color:var(--muted)">${escapeHtml(t.name || "")}</span></span>`).join("") +
+        `</div>`;
+    }
+  }
+}
+
 // Refactor-merge chunk 4: auto-render the merged tab's data-flow
 // diagram. Active channels (enabled === true && score > 0) light
 // the chain through analytics → strategies → techniques → groups;
@@ -672,6 +780,11 @@ function renderInventoryV2() {
     }
   }
   hier.innerHTML = html;
+
+  // Refactor-merge chunk 5: re-render the analytics, strategies, and
+  // detected-TTPs sections every time the hierarchy refreshes so they
+  // stay in sync with the inventory state.
+  renderInventoryAnalyticsAndStrategies();
 
   // Wire interactions.
   hier.querySelectorAll("[data-merged-toggle]").forEach(el => {
@@ -1292,6 +1405,11 @@ function getSourceScore(ds) {
 // stable shape so the UI doesn't break.
 function runCoverage() {
   if (!state.attack) return null;
+  // Refactor-merge chunk 5: when the merged inventory panel is active
+  // and "Ignore incomplete analytics" is OFF, partial-met strategies
+  // count toward coverage. The toggle persists separately so it
+  // doesn't bleed into the legacy panel's behaviour.
+  const partialStrategiesLit = state.mergedInventory && !readIgnoreIncompleteFlag();
   return computeCoverage(
     state.attack,
     effectiveLogSourceScores(state.inventory, state.attack),
@@ -1300,8 +1418,18 @@ function runCoverage() {
       riskAccepted: state.inventory.risk_accepted || null,
       disabledStrategies: state.inventory.disabled_strategies || null,
       manuallyCoveredStrategies: state.inventory.manually_covered_strategies || null,
+      partialStrategiesLit,
     },
   );
+}
+
+function readIgnoreIncompleteFlag() {
+  try { return localStorage.getItem("MERGED_INV_IGNORE_INCOMPLETE") === "1"; }
+  catch (_) { return false; }
+}
+function writeIgnoreIncompleteFlag(on) {
+  try { localStorage.setItem("MERGED_INV_IGNORE_INCOMPLETE", on ? "1" : "0"); }
+  catch (_) {}
 }
 
 // --- Detection Strategies summary (tab 4 header) ---
