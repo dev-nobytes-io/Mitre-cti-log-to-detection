@@ -28,12 +28,14 @@ test("offline ATT&CK auto-loads on first visit (no cache)", async () => {
   await page.context().close();
 });
 
-test("UI no longer surfaces 'data source' user-facing strings (chunk 15)", async () => {
-  // chunk 15: every visible label should use log-source / component
-  // category / analytic / detection-strategy terminology. Internal
-  // STIX type names (x-mitre-data-source) and the DeTT&CT YAML
-  // file_type identifier ("data-source-administration") stay — those
-  // are interop strings, not UX.
+test("UI no longer surfaces 'data source' user-facing strings or DSxxxx data-source IDs", async () => {
+  // chunk 15 removed user-facing "data source" terminology. Chunk 1 of
+  // the inventory-merge refactor goes one step further: no DSxxxx
+  // data-source attackIds rendered anywhere in the visible UI either.
+  // Internal STIX type names (x-mitre-data-source) and the DeTT&CT
+  // YAML file_type identifier ("data-source-administration") stay —
+  // those are interop strings, not UX. Detection-strategy attackIds
+  // (DETxxxx in v18+ bundles) are explicitly allowed.
   const page = await newPage({ blockExternal: true });
   await bootApp(page);
   // Header h1 + page title
@@ -47,19 +49,43 @@ test("UI no longer surfaces 'data source' user-facing strings (chunk 15)", async
   assert.doesNotMatch(headers.title, /Data Source/, `page title should not mention 'Data Source', got: ${headers.title}`);
   // Status banner after auto-load
   assert.match(headers.statusText, /component categor/i, `status should report categories, got: ${headers.statusText}`);
-  // Sweep all visible body text for forbidden phrases. Allow the
-  // singular "data component" (a real ATT&CK concept we still use)
-  // but ban the deprecated user-facing "data source" string.
+
+  // Walk every panel so we see selectors that lazy-render on tab activation
+  // (Components, Detection Strategies, Diagrams). Each panel's options +
+  // visible text get folded into the offender check below.
+  for (const id of ["inventory", "components", "coverage", "graph", "export"]) {
+    await page.evaluate((tid) => {
+      const btn = document.querySelector(`button.tab[data-tab="${tid}"]`);
+      if (btn) btn.click();
+    }, id);
+    await page.waitForTimeout(120);
+  }
+
+  // Sweep all visible body text + every <option> + every <input value>
+  // for two forbidden patterns:
+  //   1. user-facing "data source(s)" (chunk 15 baseline)
+  //   2. DSxxxx data-source attackIds, e.g. "DS0028" (chunk 1)
+  // Allow the singular "data component" (a real ATT&CK concept).
+  // DETxxxx attackIds are detection-strategy IDs and are allowed.
   const offenders = await page.evaluate(() => {
-    const re = /\bdata source(s)?\b/i;
+    const dataSourceRe = /\bdata source(s)?\b/i;
+    const dsIdRe = /\bDS\d{4,}\b/;
     const out = [];
-    document.querySelectorAll("h1, h2, h3, p, summary, label, button, .pill, .label, .stat-card .label, option, .ds-meta, .dc-meta").forEach(el => {
+    const selector = "h1, h2, h3, p, summary, label, button, .pill, .label, .stat-card .label, option, .ds-meta, .dc-meta, .tech-row, .comp-row, .ds-name, .ds-row";
+    document.querySelectorAll(selector).forEach(el => {
       const text = (el.textContent || "").trim();
-      if (re.test(text)) out.push(text.slice(0, 120));
+      if (dataSourceRe.test(text)) out.push({ kind: "data-source-string", text: text.slice(0, 120) });
+      if (dsIdRe.test(text)) out.push({ kind: "ds-attackid", text: text.slice(0, 120) });
+    });
+    document.querySelectorAll("input").forEach(el => {
+      const v = el.value || "";
+      if (dataSourceRe.test(v)) out.push({ kind: "data-source-string-input", text: v.slice(0, 120) });
+      if (dsIdRe.test(v)) out.push({ kind: "ds-attackid-input", text: v.slice(0, 120) });
     });
     return out;
   });
-  assert.deepEqual(offenders, [], `no user-visible 'data source' strings expected, got: ${JSON.stringify(offenders)}`);
+  assert.deepEqual(offenders, [],
+    `no user-visible 'data source' strings or DSxxxx attackIds expected, got: ${JSON.stringify(offenders)}`);
   await page.context().close();
 });
 
