@@ -9,7 +9,7 @@ import {
   setRiskAccepted, isRiskAccepted, logSourceRiskKey,
   exportYaml, importYaml, exportJson, importJson,
 } from "./inventory.js";
-import { computeCoverage } from "./coverage.js";
+import { computeCoverage, inclusiveAnalyticStrategyState, detectedTechniquesFromState } from "./coverage.js";
 import { buildNavigatorLayer } from "./navigator.js";
 import { conceptualDiagram, sourceDiagram, techniqueDiagram, overviewDiagram, logSourceCascadeDiagram } from "./diagrams.js";
 import {
@@ -19,10 +19,25 @@ import {
   exportThreatsYaml, importThreatsYaml, importThreatsJson,
 } from "./threats.js";
 
+// Refactor-merge chunk 2: feature flag for the unified Log Inventory panel.
+// Reads ?merged=1 from the URL or localStorage.MERGED_INVENTORY=1. While
+// the flag is on, activateTab("inventory") routes to #tab-inventory-v2
+// instead of the legacy panel. Old tabs 2/3/4 stay default-on so the
+// scaffold ships without disturbing the live UI.
+function readMergedInventoryFlag() {
+  try {
+    const urlFlag = new URLSearchParams(location.search).get("merged");
+    if (urlFlag === "1" || urlFlag === "true") return true;
+    if (urlFlag === "0" || urlFlag === "false") return false;
+    return localStorage.getItem("MERGED_INVENTORY") === "1";
+  } catch (_) { return false; }
+}
+
 const state = {
   attack: null,
   inventory: loadInventory(),
   threats: loadThreats(),
+  mergedInventory: readMergedInventoryFlag(),
   filters: {
     ds: "",
     platform: "",
@@ -37,6 +52,7 @@ const state = {
     analyticAggregation: "min", // how to aggregate log-source scores into an analytic score (V2 chain)
     inventoryGrouping: "component", // chunk N: 'component' is the merged Data Component → Log Source → Channel hierarchy (default); 'name' groups every channel under its log-source name (alternate view)
     customLsCompFilter: "", // chunk 13: filter for the component picker on the manual-entry form
+    mergedInvFilter: "", // refactor-merge chunk 3: filter for the merged inventory hierarchy
   },
   // chunk 13: which data components the user has selected for the
   // custom log source they're about to add. Persists across opens of
@@ -108,6 +124,7 @@ function coverageMemo() {
 function refreshAll() {
   state.renderCache = { lsScores: null, compScores: null, coverage: null };
   renderInventory();
+  if (state.mergedInventory) renderInventoryV2();
   renderComponents();
   renderCoverage();
   renderGraph();
@@ -160,9 +177,15 @@ function checkVendorLibs() {
 // Tabs
 function activateTab(id) {
   $$(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === id));
-  $$(".panel").forEach(p => p.classList.toggle("active", p.id === `tab-${id}`));
+  // Refactor-merge chunk 2: when the merged-inventory flag is on,
+  // route the Log Inventory tab to the unified panel
+  // (#tab-inventory-v2). Tab buttons retain their original data-tab so
+  // the highlight still tracks the user's click.
+  const panelId = (id === "inventory" && state.mergedInventory) ? "inventory-v2" : id;
+  $$(".panel").forEach(p => p.classList.toggle("active", p.id === `tab-${panelId}`));
   const sel = $("#tabsMobile");
   if (sel && sel.value !== id) sel.value = id;
+  if (panelId === "inventory-v2") renderInventoryV2();
   if (id === "components") renderComponents();
   if (id === "coverage") renderCoverage();
   if (id === "graph") renderGraph();
@@ -273,6 +296,43 @@ function populateTacticFilter() {
 
 // --- Inventory tab ---
 const renderInventoryDebounced = debounce(() => renderInventory(), 180);
+// Refactor-merge chunk 3: filter input on the merged Log Inventory tab.
+$("#mergedInvFilter")?.addEventListener("input", e => {
+  state.filters.mergedInvFilter = e.target.value;
+  renderInventoryV2();
+});
+
+// Refactor-merge chunk 4: auto-render the data-flow mermaid diagram
+// when the user opens the <details> block, and re-render (debounced)
+// whenever they toggle Active or change a score in the hierarchy.
+// Skipping the render while the <details> is collapsed avoids the
+// mermaid cost on every score change for users who never open it.
+$("#inventoryDiagram")?.addEventListener("toggle", () => renderInventoryDiagramV2());
+
+// Refactor-merge chunk 5: "Ignore incomplete analytics" toggle.
+// Persists to localStorage so the user's preference round-trips.
+// Affects display (hides .partial rows in the merged tab) AND
+// computation (runCoverage flips partialStrategiesLit), so the
+// Coverage tab's numbers move in lockstep with the toggle.
+const ignoreIncompleteCb = $("#mergedInvIgnoreIncomplete");
+if (ignoreIncompleteCb) {
+  ignoreIncompleteCb.checked = readIgnoreIncompleteFlag();
+  ignoreIncompleteCb.addEventListener("change", () => {
+    writeIgnoreIncompleteFlag(ignoreIncompleteCb.checked);
+    refreshAll();
+    scheduleInventoryDiagramRender();
+  });
+}
+
+let _inventoryDiagramTimer = null;
+function scheduleInventoryDiagramRender() {
+  if (_inventoryDiagramTimer) clearTimeout(_inventoryDiagramTimer);
+  _inventoryDiagramTimer = setTimeout(() => {
+    _inventoryDiagramTimer = null;
+    renderInventoryDiagramV2();
+  }, 250);
+}
+
 $("#dsFilter").addEventListener("input", e => {
   state.filters.ds = e.target.value.toLowerCase();
   renderInventoryDebounced();
@@ -334,24 +394,15 @@ function renderCustomLsComponentPicker() {
     return;
   }
   const filter = state.filters.customLsCompFilter || "";
-  const all = state.attack.dataComponents.slice().sort((a, b) => {
-    const sa = state.attack.dataSourceById.get(a.sourceId)?.name || "";
-    const sb = state.attack.dataSourceById.get(b.sourceId)?.name || "";
-    return sa.localeCompare(sb) || a.name.localeCompare(b.name);
-  });
-  const visible = all.filter(c => {
-    if (!filter) return true;
-    const sn = state.attack.dataSourceById.get(c.sourceId)?.name || "";
-    return (c.name + " " + sn).toLowerCase().includes(filter);
-  });
+  const all = state.attack.dataComponents.slice().sort((a, b) => a.name.localeCompare(b.name));
+  const visible = all.filter(c => !filter || c.name.toLowerCase().includes(filter));
   if (countEl) countEl.textContent = `${state.customLsComponentRefs.size} selected`;
   let html = "";
   for (const c of visible) {
     const checked = state.customLsComponentRefs.has(c.id) ? "checked" : "";
-    const sn = state.attack.dataSourceById.get(c.sourceId)?.name || "?";
     html += `<label class="component-pick">
       <input type="checkbox" data-comp-pick="${escapeAttr(c.id)}" ${checked} />
-      <span>${escapeHtml(c.name)} <span style="color:var(--muted);font-size:11px">/ ${escapeHtml(sn)}</span></span>
+      <span>${escapeHtml(c.name)}</span>
     </label>`;
   }
   if (visible.length === 0) html = `<div class="comp-meta" style="padding:6px">No components match "${escapeHtml(filter)}".</div>`;
@@ -460,8 +511,6 @@ function renderInventory() {
   const lsScores = lsScoresMemo();
 
   // Inventory summary spans the whole attack model (filter-independent).
-  const totalSources = state.attack.dataSources.length;
-  const scoredSources = state.attack.dataSources.filter(ds => getSourceScore(ds) > 0).length;
   const totalComps = state.attack.dataComponents.length;
   const scoredComps = Array.from(compScores.values()).filter(v => v.score > 0).length;
   const totalLogSources = state.attack.logSources?.length || 0;
@@ -471,7 +520,7 @@ function renderInventory() {
   // coverage, so surface the count as its own pill.
   const disabledLogSources = (state.inventory.log_sources || []).filter(e => e.enabled === false).length;
   if (summary) {
-    summary.className = "inv-summary" + ((scoredLogSources + scoredSources) > 0 ? " populated" : "");
+    summary.className = "inv-summary" + (scoredLogSources > 0 ? " populated" : "");
     summary.innerHTML = `
       <div class="pill"><strong>${scoredLogSources} / ${totalLogSources}</strong>log sources scored</div>
       <div class="pill"><strong>${scoredComps} / ${totalComps}</strong>data components covered</div>
@@ -487,6 +536,285 @@ function renderInventory() {
 }
 
 // chunk N: merged Data-Component → Log-Source → Channel hierarchy. Each
+// Refactor-merge chunk 5: render the analytics + strategies +
+// detected-TTPs sections of the merged tab. Inclusive by default —
+// any analytic with ≥1 required channel scored shows up; analytics
+// missing some required channels render greyed (.partial). Same for
+// strategies. The "Ignore incomplete" toggle hides .partial rows
+// and (via runCoverage) reverts the Coverage tab to strict counts.
+function renderInventoryAnalyticsAndStrategies() {
+  if (!state.attack) return;
+  const ignoreIncomplete = readIgnoreIncompleteFlag();
+  const lsScores = effectiveLogSourceScores(state.inventory, state.attack);
+  const incl = inclusiveAnalyticStrategyState(state.attack, lsScores);
+
+  const anRoot = $("#inventoryAnalytics");
+  if (anRoot) {
+    let html = "";
+    let visible = 0;
+    const sorted = (state.attack.analytics || []).slice().sort((a, b) => {
+      const sa = incl.analytic.get(a.id)?.state, sb = incl.analytic.get(b.id)?.state;
+      const order = { fullyMet: 0, partial: 1, none: 2 };
+      return (order[sa] ?? 3) - (order[sb] ?? 3) || (a.name || "").localeCompare(b.name || "");
+    });
+    for (const an of sorted) {
+      const s = incl.analytic.get(an.id);
+      if (!s || s.state === "none") continue;
+      if (ignoreIncomplete && s.state === "partial") continue;
+      visible++;
+      const cls = s.state === "fullyMet" ? "lit" : "partial";
+      html += `<div class="ds-row analytic-row ${cls}">
+        <div></div>
+        <div>
+          <div class="ds-name">${escapeHtml(an.name || an.id)}</div>
+          <div class="ds-meta">${s.litCount}/${s.totalCount} required log sources scored · ${s.state === "fullyMet" ? "fully met" : "partial"}</div>
+        </div>
+        <div class="ds-meta">${s.state === "fullyMet" ? "lit" : "incomplete"}</div>
+        <div></div>
+      </div>`;
+    }
+    anRoot.innerHTML = visible
+      ? html
+      : `<div style="padding:20px;color:var(--muted)">${ignoreIncomplete ? "No fully-met analytics yet — score every required channel of at least one analytic." : "Score at least one channel to populate."}</div>`;
+  }
+
+  const stRoot = $("#inventoryStrategies");
+  if (stRoot) {
+    let html = "";
+    let visible = 0;
+    const sorted = (state.attack.detectionStrategies || []).slice().sort((a, b) => {
+      const sa = incl.strategy.get(a.id)?.state, sb = incl.strategy.get(b.id)?.state;
+      const order = { active: 0, partial: 1, none: 2 };
+      return (order[sa] ?? 3) - (order[sb] ?? 3) || (a.name || "").localeCompare(b.name || "");
+    });
+    for (const st of sorted) {
+      const s = incl.strategy.get(st.id);
+      if (!s || s.state === "none") continue;
+      if (ignoreIncomplete && s.state === "partial") continue;
+      visible++;
+      const cls = s.state === "active" ? "lit" : "partial";
+      const techCount = (st.techniqueIds || []).length;
+      html += `<div class="ds-row strategy-card ${cls}">
+        <div></div>
+        <div>
+          <div class="ds-name">${escapeHtml(st.name)} <span style="color:var(--muted);font-weight:400">${escapeHtml(st.attackId || "")}</span></div>
+          <div class="ds-meta">${s.fullyMet.length} fully-met · ${s.partial.length} partial · detects ${techCount} technique${techCount === 1 ? "" : "s"}</div>
+        </div>
+        <div class="ds-meta">${s.state === "active" ? "active" : "incomplete"}</div>
+        <div></div>
+      </div>`;
+    }
+    stRoot.innerHTML = visible
+      ? html
+      : `<div style="padding:20px;color:var(--muted)">${ignoreIncomplete ? "No active strategies yet — fully meet an analytic above." : "Strategies populate automatically once an analytic has any active channel."}</div>`;
+  }
+
+  const ttpsRoot = $("#detectedTtps");
+  if (ttpsRoot) {
+    const detectedIds = detectedTechniquesFromState(state.attack, incl, { inclusive: !ignoreIncomplete });
+    if (detectedIds.size === 0) {
+      ttpsRoot.innerHTML = `<div style="padding:20px;color:var(--muted)">No active detection strategies yet.</div>`;
+    } else {
+      const techs = [];
+      for (const tid of detectedIds) {
+        const t = state.attack.techniqueById?.get(tid);
+        if (t) techs.push(t);
+      }
+      techs.sort((a, b) => (a.attackId || "").localeCompare(b.attackId || ""));
+      ttpsRoot.innerHTML = `<p style="color:var(--muted);font-size:12px">Union of techniques detected by the strategies above${ignoreIncomplete ? " (active only)" : " (active + partial)"}.</p>` +
+        `<div class="ttp-chips">` +
+        techs.map(t => `<span class="ttp-chip">${escapeHtml(t.attackId)} <span style="color:var(--muted)">${escapeHtml(t.name || "")}</span></span>`).join("") +
+        `</div>`;
+    }
+  }
+}
+
+// Refactor-merge chunk 4: auto-render the merged tab's data-flow
+// diagram. Active channels (enabled === true && score > 0) light
+// the chain through analytics → strategies → techniques → groups;
+// any analytic with at least one active channel renders, with
+// unmet log sources greyed (cascade does this naturally via its
+// lit/unlit class scheme).
+function renderInventoryDiagramV2() {
+  const host = $("#inventoryDiagramHost");
+  const details = $("#inventoryDiagram");
+  if (!host || !details) return;
+  if (!details.open) return;
+  if (!state.attack) {
+    host.innerHTML = `<div class="mermaid-empty">Load ATT&CK data first.</div>`;
+    return;
+  }
+  const lsScores = effectiveLogSourceScores(state.inventory, state.attack);
+  const activeIds = new Set();
+  for (const [lsId, info] of lsScores) {
+    if ((info?.score || 0) > 0) activeIds.add(lsId);
+  }
+  if (activeIds.size === 0) {
+    host.innerHTML = `<div class="mermaid-empty">Tick at least one channel + set score &gt; 0 to see the chain light up.</div>`;
+    return;
+  }
+  const src = logSourceCascadeDiagram({
+    attack: state.attack,
+    selectedLogSourceIds: activeIds,
+    logSourceScores: lsScores,
+    threats: state.threats,
+    analyticAggregation: state.filters.analyticAggregation || "min",
+  });
+  renderMermaidInto(host, src || "");
+}
+
+// Refactor-merge chunk 3: render the unified inventory hierarchy.
+// Three levels — Data Component → Log Source name → Channel — built
+// directly from the bundle's componentLogSources mapping. Each leaf
+// channel exposes an Active checkbox (bound to setLogSourceEnabled)
+// and a 0-5 score select (setLogSourceScore). The text filter
+// matches across component / name / channel and force-expands hits.
+//
+// Score & enabled state are read via effectiveLogSourceScores so the
+// rendering stays consistent with what coverage.js sees. A channel
+// that maps to multiple data components renders once under each
+// (state is shared because the backing inventory entry is keyed by
+// lsKey(name, channel) — ticking once activates everywhere).
+function renderInventoryV2() {
+  const hier = $("#inventoryHierarchy");
+  if (!hier) return;
+  if (!state.attack) {
+    hier.innerHTML = `<div style="padding:20px;color:var(--muted)">Load ATT&CK data first.</div>`;
+    return;
+  }
+  const filter = (state.filters.mergedInvFilter || "").trim().toLowerCase();
+  const lsScores = effectiveLogSourceScores(state.inventory, state.attack);
+  const lsEntryByKey = new Map();
+  for (const e of (state.inventory.log_sources || [])) {
+    lsEntryByKey.set(`${(e.name || "").toLowerCase()}|${(e.channel || "").toLowerCase()}`, e);
+  }
+
+  // Build hierarchy: dc -> name -> channels[].
+  const hierarchy = [];
+  for (const dc of state.attack.dataComponents) {
+    const lsByName = new Map();
+    let activeChannels = 0;
+    let totalChannels = 0;
+    for (const lsId of (dc.logSourceIds || [])) {
+      const ls = state.attack.logSourceById?.get(lsId);
+      if (!ls) continue;
+      const entry = lsEntryByKey.get(`${(ls.name || "").toLowerCase()}|${(ls.channel || "").toLowerCase()}`);
+      const score = lsScores.get(ls.id)?.score || 0;
+      const enabled = entry ? entry.enabled !== false : false;
+      const active = enabled && score > 0;
+      const channelMatch = filter
+        ? `${dc.name} ${ls.name} ${ls.channel}`.toLowerCase().includes(filter)
+        : true;
+      if (filter && !channelMatch) continue;
+      const name = ls.name || "(unnamed)";
+      if (!lsByName.has(name)) lsByName.set(name, []);
+      lsByName.get(name).push({ ls, entry, score, enabled, active });
+      totalChannels += 1;
+      if (active) activeChannels += 1;
+    }
+    if (lsByName.size === 0) continue;
+    hierarchy.push({ dc, lsByName, activeChannels, totalChannels });
+  }
+
+  if (hierarchy.length === 0) {
+    hier.innerHTML = filter
+      ? `<div style="padding:20px;color:var(--muted)">No data components match "${escapeHtml(filter)}".</div>`
+      : `<div style="padding:20px;color:var(--muted)">No data components in the loaded bundle.</div>`;
+    return;
+  }
+  hierarchy.sort((a, b) => a.dc.name.localeCompare(b.dc.name));
+
+  // Render
+  let html = "";
+  for (const h of hierarchy) {
+    const compKey = `mvc:${h.dc.id}`;
+    const compOpen = filter ? true : state.expanded.has(compKey);
+    html += `
+      <div class="ds-row" data-merged-comp="${escapeAttr(h.dc.id)}">
+        <div class="toggle" data-merged-toggle="${escapeAttr(compKey)}">${compOpen ? "▾" : "▸"}</div>
+        <div>
+          <div class="ds-name">${escapeHtml(h.dc.name)}</div>
+          <div class="ds-meta">${h.activeChannels} of ${h.totalChannels} channels active · ${h.lsByName.size} log source${h.lsByName.size === 1 ? "" : "s"}</div>
+        </div>
+        <div class="ds-meta">${h.totalChannels} channel${h.totalChannels === 1 ? "" : "s"}</div>
+        <div class="ds-meta"></div>
+      </div>`;
+    if (!compOpen) continue;
+
+    const sortedNames = Array.from(h.lsByName.keys()).sort((a, b) => a.localeCompare(b));
+    for (const lsName of sortedNames) {
+      const channels = h.lsByName.get(lsName);
+      channels.sort((a, b) => (a.ls.channel || "").localeCompare(b.ls.channel || ""));
+      const nameKey = `mvn:${h.dc.id}:${lsName}`;
+      const nameOpen = filter ? true : state.expanded.has(nameKey);
+      const nameActive = channels.filter(c => c.active).length;
+      html += `
+        <div class="ds-row" style="background:var(--surface-2,#fafafa);padding-left:24px" data-merged-name="${escapeAttr(nameKey)}">
+          <div class="toggle" data-merged-toggle="${escapeAttr(nameKey)}">${nameOpen ? "▾" : "▸"}</div>
+          <div>
+            <div class="ds-name">${escapeHtml(lsName)}</div>
+            <div class="ds-meta">${nameActive} of ${channels.length} channel${channels.length === 1 ? "" : "s"} active</div>
+          </div>
+          <div class="ds-meta"></div>
+          <div class="ds-meta"></div>
+        </div>`;
+      if (!nameOpen) continue;
+      for (const ch of channels) {
+        const channelKey = `${ch.ls.name || ""}||${ch.ls.channel || ""}`;
+        html += `
+          <div class="dc-row by-name-row${ch.enabled ? "" : " parked"}" data-merged-channel="${escapeAttr(channelKey)}">
+            <div>
+              <div class="dc-name">${escapeHtml(ch.ls.name || "")} <span style="color:var(--muted);font-weight:400">/ ${escapeHtml(ch.ls.channel || "")}</span></div>
+              <div class="dc-meta">${ch.active ? "active" : "inactive"}${ch.score > 0 ? ` · score ${ch.score}` : ""}</div>
+            </div>
+            <div class="dc-meta enable-cell">
+              <label class="enable-toggle" title="Tick to count this channel toward analytics + coverage. Score must be > 0 for the chain to light up.">
+                <input type="checkbox" data-merged-active="${escapeAttr(channelKey)}" ${ch.enabled ? "checked" : ""} />
+                <span>${ch.enabled ? "active" : "inactive"}</span>
+              </label>
+            </div>
+            <div>${scoreSelect(ch.score, "merged-ls", channelKey)}</div>
+            <div></div>
+          </div>`;
+      }
+    }
+  }
+  hier.innerHTML = html;
+
+  // Refactor-merge chunk 5: re-render the analytics, strategies, and
+  // detected-TTPs sections every time the hierarchy refreshes so they
+  // stay in sync with the inventory state.
+  renderInventoryAnalyticsAndStrategies();
+
+  // Wire interactions.
+  hier.querySelectorAll("[data-merged-toggle]").forEach(el => {
+    el.addEventListener("click", () => {
+      const key = el.getAttribute("data-merged-toggle");
+      if (state.expanded.has(key)) state.expanded.delete(key);
+      else state.expanded.add(key);
+      renderInventoryV2();
+    });
+  });
+  hier.querySelectorAll("input[data-merged-active]").forEach(box => {
+    box.addEventListener("change", () => {
+      const [name, channel] = box.getAttribute("data-merged-active").split("||");
+      setLogSourceEnabled(state.inventory, name, channel, box.checked);
+      saveInventory(state.inventory);
+      refreshAll();
+      scheduleInventoryDiagramRender();
+    });
+  });
+  hier.querySelectorAll("select[data-kind='merged-ls']").forEach(sel => {
+    sel.addEventListener("change", () => {
+      const [name, channel] = sel.getAttribute("data-key").split("||");
+      setLogSourceScore(state.inventory, name, channel, Number(sel.value));
+      saveInventory(state.inventory);
+      refreshAll();
+      scheduleInventoryDiagramRender();
+    });
+  });
+}
+
 // data component (Process Creation, File Modification, Logon Session
 // Creation, ...) groups the log-source names that feed it; each name
 // expands to the (name, channel) tuples the bundle declares for that
@@ -552,7 +880,6 @@ function renderInventoryByComponent(root, lsScores) {
     if (onlyScored && scoredChannels === 0) continue;
     hierarchy.set(dc.id, {
       dc,
-      sourceName: state.attack.dataSourceById.get(dc.sourceId)?.name || "?",
       lsByName,
       totalChannels,
       scoredChannels,
@@ -619,7 +946,7 @@ function renderInventoryByComponent(root, lsScores) {
       <div class="ds-row" data-ds-id="${escapeAttr(expandKey)}">
         <div class="toggle" data-toggle="${escapeAttr(expandKey)}">${expanded ? "▾" : "▸"}</div>
         <div>
-          <div class="ds-name">${escapeHtml(h.dc.name)} <span style="color:var(--muted);font-weight:400">${escapeHtml(h.sourceName)}</span></div>
+          <div class="ds-name">${escapeHtml(h.dc.name)}</div>
           <div class="ds-meta">${h.scoredChannels} of ${h.totalChannels} channels active · ${h.lsByName.size} log source${h.lsByName.size === 1 ? "" : "s"}</div>
         </div>
         <div class="ds-meta">${h.totalChannels} channel${h.totalChannels === 1 ? "" : "s"}</div>
@@ -961,7 +1288,6 @@ function renderComponents() {
       id: dc.id,
       stixId: dc.id,
       name: dc.name,
-      sourceName: state.attack.dataSourceById.get(dc.sourceId)?.name || "?",
       score,
       hasOverride: !!eff?.hasOverride,
       techCount: dc.techniqueIds.length,
@@ -987,18 +1313,18 @@ function renderComponents() {
     `;
   }
   const rows = all.filter(c => {
-    if (filter && !(c.name.toLowerCase().includes(filter) || c.sourceName.toLowerCase().includes(filter))) return false;
+    if (filter && !c.name.toLowerCase().includes(filter)) return false;
     if (minScore === "0" && c.score !== 0) return false;
     if (minScore === "1" && c.score < 1) return false;
     if (minScore === "3" && c.score < 3) return false;
     return true;
-  }).sort((a, b) => b.score - a.score || a.sourceName.localeCompare(b.sourceName) || a.name.localeCompare(b.name));
+  }).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
 
   // chunk 12: colour-coded rows + expandable details so users can see
   // which log sources feed each component and which analytics
   // reference it. Coverage class drives a left-border + soft tint:
   //   covered (>=3) green, partial (1-2) amber, uncovered grey.
-  let html = `<div class="tech-row header"><div></div><div>Component</div><div>Category</div><div>Log sources / Analytics</div><div>Techniques</div><div>Score</div></div>`;
+  let html = `<div class="tech-row header"><div></div><div>Component</div><div>Log sources / Analytics</div><div>Techniques</div><div>Score</div></div>`;
   for (const c of rows.slice(0, 1500)) {
     const coverageCls = c.score >= 3 ? "comp-covered" : (c.score >= 1 ? "comp-partial" : "comp-uncovered");
     const expanded = state.expanded.has(`comp:${c.id}`);
@@ -1006,7 +1332,6 @@ function renderComponents() {
       <div class="tech-row comp-row ${coverageCls}" data-comp-id="${escapeAttr(c.id)}">
         <div class="comp-toggle" data-comp-toggle="${escapeAttr(c.id)}" style="cursor:pointer;color:var(--muted)">${expanded ? "▾" : "▸"}</div>
         <div><strong>${escapeHtml(c.name)}</strong>${c.hasOverride ? ' <span class="cov-tag">scored</span>' : ' <span class="unc-tag">uncovered</span>'}</div>
-        <div style="color:var(--muted)">${escapeHtml(c.sourceName)}</div>
         <div style="color:var(--muted);font-size:11px">${c.logSourceCount} log src · ${c.analyticCount} analytic${c.analyticCount === 1 ? "" : "s"}</div>
         <div style="color:var(--muted);font-size:11px">${c.techCount} tech</div>
         <div><span class="score-badge s${c.score}">${c.score}</span></div>
@@ -1080,6 +1405,11 @@ function getSourceScore(ds) {
 // stable shape so the UI doesn't break.
 function runCoverage() {
   if (!state.attack) return null;
+  // Refactor-merge chunk 5: when the merged inventory panel is active
+  // and "Ignore incomplete analytics" is OFF, partial-met strategies
+  // count toward coverage. The toggle persists separately so it
+  // doesn't bleed into the legacy panel's behaviour.
+  const partialStrategiesLit = state.mergedInventory && !readIgnoreIncompleteFlag();
   return computeCoverage(
     state.attack,
     effectiveLogSourceScores(state.inventory, state.attack),
@@ -1088,8 +1418,18 @@ function runCoverage() {
       riskAccepted: state.inventory.risk_accepted || null,
       disabledStrategies: state.inventory.disabled_strategies || null,
       manuallyCoveredStrategies: state.inventory.manually_covered_strategies || null,
+      partialStrategiesLit,
     },
   );
+}
+
+function readIgnoreIncompleteFlag() {
+  try { return localStorage.getItem("MERGED_INV_IGNORE_INCOMPLETE") === "1"; }
+  catch (_) { return false; }
+}
+function writeIgnoreIncompleteFlag(on) {
+  try { localStorage.setItem("MERGED_INV_IGNORE_INCOMPLETE", on ? "1" : "0"); }
+  catch (_) {}
 }
 
 // --- Detection Strategies summary (tab 4 header) ---
@@ -1744,7 +2084,7 @@ function populateGraphSelectors() {
   const sel = $("#graphSourceSelect");
   if (sel.options.length <= 1 && state.attack) {
     sel.innerHTML = `<option value="">Select a component category…</option>` +
-      state.attack.dataSources.map(ds => `<option value="${escapeAttr(ds.id)}">${escapeHtml(ds.name)} (${escapeHtml(ds.attackId || "")})</option>`).join("");
+      state.attack.dataSources.map(ds => `<option value="${escapeAttr(ds.id)}">${escapeHtml(ds.name)}</option>`).join("");
   }
   if (state.graph.sourceId) sel.value = state.graph.sourceId;
 
@@ -1779,7 +2119,7 @@ function currentLayer() {
   return buildNavigatorLayer({
     coverage: cov,
     attack: state.attack,
-    name: $("#layerName").value || "Data source coverage",
+    name: $("#layerName").value || "Detection coverage",
     description: $("#layerDesc").value || "",
     colorMin: $("#colorMin").value,
     colorMax: $("#colorMax").value,

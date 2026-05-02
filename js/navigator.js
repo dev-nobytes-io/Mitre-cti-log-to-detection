@@ -7,7 +7,7 @@ const DOMAIN_TO_LAYER_DOMAIN = {
   "ics-attack": "ics-attack",
 };
 
-export function buildNavigatorLayer({ coverage, attack, name = "Data source coverage", description = "", colorMin = "#ffe0b3", colorMax = "#0066cc", includeUncovered = false } = {}) {
+export function buildNavigatorLayer({ coverage, attack, name = "Detection coverage", description = "", colorMin = "#ffe0b3", colorMax = "#0066cc", includeUncovered = false } = {}) {
   const techniques = [];
   for (const row of coverage.rows) {
     if (!row.hasDetections) continue;

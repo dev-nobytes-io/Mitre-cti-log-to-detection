@@ -20,7 +20,59 @@
 // Each row exposes V2-native fields plus legacy aliases
 // (totalDetectingComponents, coveredComponents, coveringComponents,
 // maxScore) so navigator.js, threats.js, and existing UI keep working.
-export function computeCoverage(attack, logSourceScores, { analyticAggregation = "min", riskAccepted = null, disabledStrategies = null, manuallyCoveredStrategies = null } = {}) {
+// Refactor-merge chunk 5: inclusive analytic/strategy state for the
+// merged Log Inventory panel.
+//
+//   fullyMet  = every required log source has score > 0
+//   partial   = ≥1 required log source has score > 0, but not all
+//   active    = strategy contains ≥1 fullyMet analytic
+//   partialSt = strategy has 0 fullyMet but ≥1 partial analytics
+//
+// Active strategies + (when inclusive=true) partial strategies feed
+// the Detected-TTPs chip list. Used by the merged inventory panel
+// for the inclusive analytic/strategy display.
+export function inclusiveAnalyticStrategyState(attack, logSourceScores) {
+  const analytic = new Map(); // analyticId -> { state: "fullyMet"|"partial"|"none", litCount, totalCount }
+  for (const an of attack.analytics || []) {
+    const total = (an.logSourceIds || []).length;
+    const lit = (an.logSourceIds || []).filter(id => (logSourceScores.get(id)?.score || 0) > 0).length;
+    let state;
+    if (total === 0) state = "none";
+    else if (lit === total) state = "fullyMet";
+    else if (lit > 0) state = "partial";
+    else state = "none";
+    analytic.set(an.id, { state, litCount: lit, totalCount: total, name: an.name });
+  }
+  const strategy = new Map(); // strategyId -> { state, fullyMetIds, partialIds }
+  for (const st of attack.detectionStrategies || []) {
+    const ids = st.analyticIds || [];
+    const fullyMet = ids.filter(id => analytic.get(id)?.state === "fullyMet");
+    const partial  = ids.filter(id => analytic.get(id)?.state === "partial");
+    let state;
+    if (fullyMet.length > 0) state = "active";
+    else if (partial.length > 0) state = "partial";
+    else state = "none";
+    strategy.set(st.id, { state, fullyMet, partial });
+  }
+  return { analytic, strategy };
+}
+
+// Detected TTPs as a Set of technique STIX ids. When inclusive=true,
+// strategies whose state === "partial" also contribute their
+// techniqueIds.
+export function detectedTechniquesFromState(attack, state, { inclusive = false } = {}) {
+  const out = new Set();
+  for (const st of attack.detectionStrategies || []) {
+    const stState = state.strategy.get(st.id);
+    if (!stState) continue;
+    if (stState.state === "active" || (inclusive && stState.state === "partial")) {
+      for (const tid of (st.techniqueIds || [])) out.add(tid);
+    }
+  }
+  return out;
+}
+
+export function computeCoverage(attack, logSourceScores, { analyticAggregation = "min", riskAccepted = null, disabledStrategies = null, manuallyCoveredStrategies = null, partialStrategiesLit = false } = {}) {
   const isRisk = (kind, key) => !!(riskAccepted && riskAccepted[kind] && riskAccepted[kind][key]);
   const isStratDisabled = (sid) => !!(disabledStrategies && disabledStrategies[sid]);
   const isStratManual = (sid) => !!(manuallyCoveredStrategies && manuallyCoveredStrategies[sid]);
@@ -48,7 +100,12 @@ export function computeCoverage(attack, logSourceScores, { analyticAggregation =
   // them as "parked"; they contribute 0 to coverage. Manually-covered
   // strategies (chunk 17) light up at MANUAL_SCORE regardless of the
   // chain — the user has asserted they have a detection in place even
-  // if the bundle's analytic spec wouldn't validate it.
+  // if the bundle's analytic spec wouldn't validate it. partialLit
+  // (refactor-merge chunk 5) treats a strategy whose analytics have
+  // ≥1 partially-met log source as lit at the inclusive sentinel
+  // score so the Coverage tab honours the merged tab's "Ignore
+  // incomplete" toggle.
+  const PARTIAL_LIT_SCORE = 1;
   const strategyScores = new Map(); // strategyId -> { lit, score, name, attackId, analytics: [...], disabled, manual }
   for (const st of attack.detectionStrategies || []) {
     const disabled = isStratDisabled(st.id);
@@ -58,13 +115,18 @@ export function computeCoverage(attack, logSourceScores, { analyticAggregation =
       return a ? { id, ...a } : null;
     }).filter(Boolean);
     const litAns = ans.filter(a => a.lit);
+    // chunk 5: a partial analytic has ≥1 of its required log sources
+    // scored but not all (lit === false but ≥1 score > 0).
+    const partialAns = ans.filter(a => !a.lit && (a.logSources || []).some(l => l.score > 0));
     const chainLit = !disabled && litAns.length > 0;
-    const lit = chainLit || manual;
+    const partialChain = !disabled && !chainLit && partialStrategiesLit && partialAns.length > 0;
+    const lit = chainLit || manual || partialChain;
     let score = 0;
     if (chainLit && manual) score = Math.max(MANUAL_SCORE, ...litAns.map(a => a.score));
     else if (chainLit) score = Math.max(...litAns.map(a => a.score));
     else if (manual) score = MANUAL_SCORE;
-    strategyScores.set(st.id, { lit, score, name: st.name, attackId: st.attackId, analytics: ans, disabled, manual });
+    else if (partialChain) score = PARTIAL_LIT_SCORE;
+    strategyScores.set(st.id, { lit, score, name: st.name, attackId: st.attackId, analytics: ans, disabled, manual, partial: partialChain });
   }
 
   // 3. Score each technique via its detecting strategies.

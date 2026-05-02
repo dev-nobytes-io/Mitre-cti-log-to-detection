@@ -174,6 +174,41 @@
       <div id="inventoryTable" class="ds-list"></div>
     </section>
 
+    <!-- Refactor-merge chunk 2: scaffold for the unified Log Inventory panel.
+         Activated when ?merged=1 is in the URL or localStorage.MERGED_INVENTORY=1.
+         Empty placeholders only — wiring lands in chunks 3-5. -->
+    <section class="panel" id="tab-inventory-v2" role="tabpanel" data-merged-inventory>
+      <h2>2. Log Inventory <span class="muted-pill" title="Unified Data Component → Log Source → Channel view, scoring, analytics + strategies, and detected TTPs in one tab. Replaces tabs 2/3/4 once the flag flips.">merged preview</span></h2>
+      <p>Single place to score channels, watch the analytic / detection-strategy / TTP chain light up, and see what threats you can detect.</p>
+      <div class="row">
+        <input type="search" id="mergedInvFilter" placeholder="Filter components, log sources, channels…" />
+        <label class="checkbox-row" title="Hide analytics (and their strategies) where only some required channels are scored. Off = inclusive: partial chains count as detecting.">
+          <input type="checkbox" id="mergedInvIgnoreIncomplete" /> Ignore incomplete analytics
+        </label>
+      </div>
+      <details id="inventoryDiagram" class="merged-inv-diagram">
+        <summary>Data flow diagram</summary>
+        <p class="diagram-help">Auto-generated from your selections — Data Component → Log Source → Channel → Analytic → Strategy → Technique. Greyed nodes are incomplete chains.</p>
+        <div class="mermaid-host" id="inventoryDiagramHost"></div>
+      </details>
+      <h3 class="diagram-h">Inventory</h3>
+      <div id="inventoryHierarchy" class="ds-list">
+        <div style="padding:20px;color:var(--muted)">Load ATT&amp;CK data first.</div>
+      </div>
+      <h3 class="diagram-h">Analytics</h3>
+      <div id="inventoryAnalytics" class="ds-list">
+        <div style="padding:20px;color:var(--muted)">Score at least one channel to populate.</div>
+      </div>
+      <h3 class="diagram-h">Detection strategies</h3>
+      <div id="inventoryStrategies" class="ds-list">
+        <div style="padding:20px;color:var(--muted)">Populated automatically by the analytics above.</div>
+      </div>
+      <h3 class="diagram-h">Detected TTPs</h3>
+      <div id="detectedTtps" class="merged-inv-ttps">
+        <div style="padding:20px;color:var(--muted)">No active detection strategies yet.</div>
+      </div>
+    </section>
+
     <section class="panel" id="tab-components" role="tabpanel">
       <h2>3. Data Components</h2>
       <p>Flat list of every ATT&amp;CK data component. The score on the right is the maximum score across the log sources that feed this component (set on tab 2). Use it to spot collection gaps quickly.</p>
@@ -398,7 +433,7 @@
         </div>
       </details>
       <div class="row">
-        <label>Layer name <input type="text" id="layerName" value="Data source coverage" /></label>
+        <label>Layer name <input type="text" id="layerName" value="Detection coverage" /></label>
         <label>Description <input type="text" id="layerDesc" value="Detection coverage from log source inventory" /></label>
       </div>
       <div class="row">
