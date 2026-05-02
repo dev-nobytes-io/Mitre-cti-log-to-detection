@@ -302,6 +302,22 @@ $("#mergedInvFilter")?.addEventListener("input", e => {
   renderInventoryV2();
 });
 
+// Refactor-merge chunk 4: auto-render the data-flow mermaid diagram
+// when the user opens the <details> block, and re-render (debounced)
+// whenever they toggle Active or change a score in the hierarchy.
+// Skipping the render while the <details> is collapsed avoids the
+// mermaid cost on every score change for users who never open it.
+$("#inventoryDiagram")?.addEventListener("toggle", () => renderInventoryDiagramV2());
+
+let _inventoryDiagramTimer = null;
+function scheduleInventoryDiagramRender() {
+  if (_inventoryDiagramTimer) clearTimeout(_inventoryDiagramTimer);
+  _inventoryDiagramTimer = setTimeout(() => {
+    _inventoryDiagramTimer = null;
+    renderInventoryDiagramV2();
+  }, 250);
+}
+
 $("#dsFilter").addEventListener("input", e => {
   state.filters.ds = e.target.value.toLowerCase();
   renderInventoryDebounced();
@@ -505,6 +521,40 @@ function renderInventory() {
 }
 
 // chunk N: merged Data-Component → Log-Source → Channel hierarchy. Each
+// Refactor-merge chunk 4: auto-render the merged tab's data-flow
+// diagram. Active channels (enabled === true && score > 0) light
+// the chain through analytics → strategies → techniques → groups;
+// any analytic with at least one active channel renders, with
+// unmet log sources greyed (cascade does this naturally via its
+// lit/unlit class scheme).
+function renderInventoryDiagramV2() {
+  const host = $("#inventoryDiagramHost");
+  const details = $("#inventoryDiagram");
+  if (!host || !details) return;
+  if (!details.open) return;
+  if (!state.attack) {
+    host.innerHTML = `<div class="mermaid-empty">Load ATT&CK data first.</div>`;
+    return;
+  }
+  const lsScores = effectiveLogSourceScores(state.inventory, state.attack);
+  const activeIds = new Set();
+  for (const [lsId, info] of lsScores) {
+    if ((info?.score || 0) > 0) activeIds.add(lsId);
+  }
+  if (activeIds.size === 0) {
+    host.innerHTML = `<div class="mermaid-empty">Tick at least one channel + set score &gt; 0 to see the chain light up.</div>`;
+    return;
+  }
+  const src = logSourceCascadeDiagram({
+    attack: state.attack,
+    selectedLogSourceIds: activeIds,
+    logSourceScores: lsScores,
+    threats: state.threats,
+    analyticAggregation: state.filters.analyticAggregation || "min",
+  });
+  renderMermaidInto(host, src || "");
+}
+
 // Refactor-merge chunk 3: render the unified inventory hierarchy.
 // Three levels — Data Component → Log Source name → Channel — built
 // directly from the bundle's componentLogSources mapping. Each leaf
@@ -638,6 +688,7 @@ function renderInventoryV2() {
       setLogSourceEnabled(state.inventory, name, channel, box.checked);
       saveInventory(state.inventory);
       refreshAll();
+      scheduleInventoryDiagramRender();
     });
   });
   hier.querySelectorAll("select[data-kind='merged-ls']").forEach(sel => {
@@ -646,6 +697,7 @@ function renderInventoryV2() {
       setLogSourceScore(state.inventory, name, channel, Number(sel.value));
       saveInventory(state.inventory);
       refreshAll();
+      scheduleInventoryDiagramRender();
     });
   });
 }

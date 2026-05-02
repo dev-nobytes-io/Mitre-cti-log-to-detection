@@ -179,6 +179,60 @@ test("merged inventory: filter narrows visible components and force-expands matc
   assert.ok(filtered.channels >= 1, `filter should force-expand and show channel rows, got ${filtered.channels}`);
 });
 
+test("merged inventory: data-flow diagram renders on details-open + re-renders after a score change", async () => {
+  const page = await newPage({ blockExternal: true });
+  await bootMerged(page);
+  await page.click('button.tab[data-tab="inventory"]');
+  await page.waitForTimeout(150);
+
+  // Cold start: <details> is closed so no SVG yet.
+  const initial = await page.evaluate(() =>
+    document.querySelectorAll("#inventoryDiagramHost svg").length);
+  assert.equal(initial, 0, "diagram should not render while <details> is collapsed");
+
+  // Open the diagram with no inventory yet — should show empty-state copy.
+  await page.evaluate(() => { document.querySelector("#inventoryDiagram").open = true; document.querySelector("#inventoryDiagram").dispatchEvent(new Event("toggle")); });
+  await page.waitForTimeout(400);
+  const emptyState = await page.evaluate(() => document.querySelector("#inventoryDiagramHost")?.textContent || "");
+  assert.match(emptyState, /Tick at least one channel/, `empty-state copy expected, got: ${emptyState.slice(0, 120)}`);
+
+  // Pick a channel deterministically (analytic-driver, same shape as the
+  // chunk-0 delta test) so we know scoring it produces a non-empty
+  // diagram with downstream nodes.
+  const target = await page.evaluate(async () => {
+    const [{ loadOfflineBundle }] = await Promise.all([import("/js/attack.js")]);
+    const attack = await loadOfflineBundle();
+    for (const an of (attack.analytics || [])) {
+      if ((an.logSourceIds || []).length < 1) continue;
+      const ls = attack.logSourceById?.get(an.logSourceIds[0]);
+      if (ls?.name && ls?.channel) return { name: ls.name, channel: ls.channel };
+    }
+    return null;
+  });
+  assert.ok(target, "couldn't resolve a target channel");
+
+  // Score that channel via inventory APIs (skip the UI-expand dance —
+  // chunk 3 already covers UI scoring; here we just need the diagram
+  // re-render trigger).
+  await page.evaluate(async ({ name, channel }) => {
+    const inv = await import("/js/inventory.js");
+    const cur = JSON.parse(localStorage.getItem("attack-inventory-v2") || "{}");
+    const merged = inv.setLogSourceScore(cur, name, channel, 5);
+    inv.setLogSourceEnabled(merged, name, channel, true);
+    inv.saveInventory(merged);
+    location.reload();
+  }, target);
+  await page.waitForFunction(() => /Loaded \d+ (data sources|component categories)/.test(document.querySelector("#statusText")?.textContent || ""));
+  await page.click('button.tab[data-tab="inventory"]');
+  await page.waitForTimeout(150);
+  await page.evaluate(() => { document.querySelector("#inventoryDiagram").open = true; document.querySelector("#inventoryDiagram").dispatchEvent(new Event("toggle")); });
+  // Wait for the debounced render + mermaid render.
+  await page.waitForFunction(() => document.querySelectorAll("#inventoryDiagramHost svg").length > 0, { timeout: 5000 });
+  const populated = await page.evaluate(() =>
+    document.querySelectorAll("#inventoryDiagramHost svg").length);
+  assert.ok(populated >= 1, `diagram should render an SVG once a channel is scored, got ${populated}`);
+});
+
 test("localStorage.MERGED_INVENTORY=1 enables the merged panel without the URL flag", async () => {
   const page = await newPage({ blockExternal: true });
   // Set the localStorage flag before the app boots so the state-init
