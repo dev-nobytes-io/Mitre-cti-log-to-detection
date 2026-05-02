@@ -52,6 +52,7 @@ const state = {
     analyticAggregation: "min", // how to aggregate log-source scores into an analytic score (V2 chain)
     inventoryGrouping: "component", // chunk N: 'component' is the merged Data Component → Log Source → Channel hierarchy (default); 'name' groups every channel under its log-source name (alternate view)
     customLsCompFilter: "", // chunk 13: filter for the component picker on the manual-entry form
+    mergedInvFilter: "", // refactor-merge chunk 3: filter for the merged inventory hierarchy
   },
   // chunk 13: which data components the user has selected for the
   // custom log source they're about to add. Persists across opens of
@@ -123,6 +124,7 @@ function coverageMemo() {
 function refreshAll() {
   state.renderCache = { lsScores: null, compScores: null, coverage: null };
   renderInventory();
+  if (state.mergedInventory) renderInventoryV2();
   renderComponents();
   renderCoverage();
   renderGraph();
@@ -294,6 +296,12 @@ function populateTacticFilter() {
 
 // --- Inventory tab ---
 const renderInventoryDebounced = debounce(() => renderInventory(), 180);
+// Refactor-merge chunk 3: filter input on the merged Log Inventory tab.
+$("#mergedInvFilter")?.addEventListener("input", e => {
+  state.filters.mergedInvFilter = e.target.value;
+  renderInventoryV2();
+});
+
 $("#dsFilter").addEventListener("input", e => {
   state.filters.ds = e.target.value.toLowerCase();
   renderInventoryDebounced();
@@ -497,17 +505,149 @@ function renderInventory() {
 }
 
 // chunk N: merged Data-Component → Log-Source → Channel hierarchy. Each
-// Refactor-merge chunk 2: stub renderer for the unified Log Inventory
-// panel. Activated when state.mergedInventory is true. Just keeps
-// the placeholder DOM in a consistent state for now — chunks 3-5
-// fill in the hierarchy / diagram / analytics / strategies / TTPs.
+// Refactor-merge chunk 3: render the unified inventory hierarchy.
+// Three levels — Data Component → Log Source name → Channel — built
+// directly from the bundle's componentLogSources mapping. Each leaf
+// channel exposes an Active checkbox (bound to setLogSourceEnabled)
+// and a 0-5 score select (setLogSourceScore). The text filter
+// matches across component / name / channel and force-expands hits.
+//
+// Score & enabled state are read via effectiveLogSourceScores so the
+// rendering stays consistent with what coverage.js sees. A channel
+// that maps to multiple data components renders once under each
+// (state is shared because the backing inventory entry is keyed by
+// lsKey(name, channel) — ticking once activates everywhere).
 function renderInventoryV2() {
   const hier = $("#inventoryHierarchy");
-  if (hier) {
-    hier.innerHTML = state.attack
-      ? `<div style="padding:20px;color:var(--muted)">Hierarchy renders in chunk 3 — Data Component → Log Source → Channel.</div>`
-      : `<div style="padding:20px;color:var(--muted)">Load ATT&CK data first.</div>`;
+  if (!hier) return;
+  if (!state.attack) {
+    hier.innerHTML = `<div style="padding:20px;color:var(--muted)">Load ATT&CK data first.</div>`;
+    return;
   }
+  const filter = (state.filters.mergedInvFilter || "").trim().toLowerCase();
+  const lsScores = effectiveLogSourceScores(state.inventory, state.attack);
+  const lsEntryByKey = new Map();
+  for (const e of (state.inventory.log_sources || [])) {
+    lsEntryByKey.set(`${(e.name || "").toLowerCase()}|${(e.channel || "").toLowerCase()}`, e);
+  }
+
+  // Build hierarchy: dc -> name -> channels[].
+  const hierarchy = [];
+  for (const dc of state.attack.dataComponents) {
+    const lsByName = new Map();
+    let activeChannels = 0;
+    let totalChannels = 0;
+    for (const lsId of (dc.logSourceIds || [])) {
+      const ls = state.attack.logSourceById?.get(lsId);
+      if (!ls) continue;
+      const entry = lsEntryByKey.get(`${(ls.name || "").toLowerCase()}|${(ls.channel || "").toLowerCase()}`);
+      const score = lsScores.get(ls.id)?.score || 0;
+      const enabled = entry ? entry.enabled !== false : false;
+      const active = enabled && score > 0;
+      const channelMatch = filter
+        ? `${dc.name} ${ls.name} ${ls.channel}`.toLowerCase().includes(filter)
+        : true;
+      if (filter && !channelMatch) continue;
+      const name = ls.name || "(unnamed)";
+      if (!lsByName.has(name)) lsByName.set(name, []);
+      lsByName.get(name).push({ ls, entry, score, enabled, active });
+      totalChannels += 1;
+      if (active) activeChannels += 1;
+    }
+    if (lsByName.size === 0) continue;
+    hierarchy.push({ dc, lsByName, activeChannels, totalChannels });
+  }
+
+  if (hierarchy.length === 0) {
+    hier.innerHTML = filter
+      ? `<div style="padding:20px;color:var(--muted)">No data components match "${escapeHtml(filter)}".</div>`
+      : `<div style="padding:20px;color:var(--muted)">No data components in the loaded bundle.</div>`;
+    return;
+  }
+  hierarchy.sort((a, b) => a.dc.name.localeCompare(b.dc.name));
+
+  // Render
+  let html = "";
+  for (const h of hierarchy) {
+    const compKey = `mvc:${h.dc.id}`;
+    const compOpen = filter ? true : state.expanded.has(compKey);
+    html += `
+      <div class="ds-row" data-merged-comp="${escapeAttr(h.dc.id)}">
+        <div class="toggle" data-merged-toggle="${escapeAttr(compKey)}">${compOpen ? "▾" : "▸"}</div>
+        <div>
+          <div class="ds-name">${escapeHtml(h.dc.name)}</div>
+          <div class="ds-meta">${h.activeChannels} of ${h.totalChannels} channels active · ${h.lsByName.size} log source${h.lsByName.size === 1 ? "" : "s"}</div>
+        </div>
+        <div class="ds-meta">${h.totalChannels} channel${h.totalChannels === 1 ? "" : "s"}</div>
+        <div class="ds-meta"></div>
+      </div>`;
+    if (!compOpen) continue;
+
+    const sortedNames = Array.from(h.lsByName.keys()).sort((a, b) => a.localeCompare(b));
+    for (const lsName of sortedNames) {
+      const channels = h.lsByName.get(lsName);
+      channels.sort((a, b) => (a.ls.channel || "").localeCompare(b.ls.channel || ""));
+      const nameKey = `mvn:${h.dc.id}:${lsName}`;
+      const nameOpen = filter ? true : state.expanded.has(nameKey);
+      const nameActive = channels.filter(c => c.active).length;
+      html += `
+        <div class="ds-row" style="background:var(--surface-2,#fafafa);padding-left:24px" data-merged-name="${escapeAttr(nameKey)}">
+          <div class="toggle" data-merged-toggle="${escapeAttr(nameKey)}">${nameOpen ? "▾" : "▸"}</div>
+          <div>
+            <div class="ds-name">${escapeHtml(lsName)}</div>
+            <div class="ds-meta">${nameActive} of ${channels.length} channel${channels.length === 1 ? "" : "s"} active</div>
+          </div>
+          <div class="ds-meta"></div>
+          <div class="ds-meta"></div>
+        </div>`;
+      if (!nameOpen) continue;
+      for (const ch of channels) {
+        const channelKey = `${ch.ls.name || ""}||${ch.ls.channel || ""}`;
+        html += `
+          <div class="dc-row by-name-row${ch.enabled ? "" : " parked"}" data-merged-channel="${escapeAttr(channelKey)}">
+            <div>
+              <div class="dc-name">${escapeHtml(ch.ls.name || "")} <span style="color:var(--muted);font-weight:400">/ ${escapeHtml(ch.ls.channel || "")}</span></div>
+              <div class="dc-meta">${ch.active ? "active" : "inactive"}${ch.score > 0 ? ` · score ${ch.score}` : ""}</div>
+            </div>
+            <div class="dc-meta enable-cell">
+              <label class="enable-toggle" title="Tick to count this channel toward analytics + coverage. Score must be > 0 for the chain to light up.">
+                <input type="checkbox" data-merged-active="${escapeAttr(channelKey)}" ${ch.enabled ? "checked" : ""} />
+                <span>${ch.enabled ? "active" : "inactive"}</span>
+              </label>
+            </div>
+            <div>${scoreSelect(ch.score, "merged-ls", channelKey)}</div>
+            <div></div>
+          </div>`;
+      }
+    }
+  }
+  hier.innerHTML = html;
+
+  // Wire interactions.
+  hier.querySelectorAll("[data-merged-toggle]").forEach(el => {
+    el.addEventListener("click", () => {
+      const key = el.getAttribute("data-merged-toggle");
+      if (state.expanded.has(key)) state.expanded.delete(key);
+      else state.expanded.add(key);
+      renderInventoryV2();
+    });
+  });
+  hier.querySelectorAll("input[data-merged-active]").forEach(box => {
+    box.addEventListener("change", () => {
+      const [name, channel] = box.getAttribute("data-merged-active").split("||");
+      setLogSourceEnabled(state.inventory, name, channel, box.checked);
+      saveInventory(state.inventory);
+      refreshAll();
+    });
+  });
+  hier.querySelectorAll("select[data-kind='merged-ls']").forEach(sel => {
+    sel.addEventListener("change", () => {
+      const [name, channel] = sel.getAttribute("data-key").split("||");
+      setLogSourceScore(state.inventory, name, channel, Number(sel.value));
+      saveInventory(state.inventory);
+      refreshAll();
+    });
+  });
 }
 
 // data component (Process Creation, File Modification, Logon Session
