@@ -334,24 +334,15 @@ function renderCustomLsComponentPicker() {
     return;
   }
   const filter = state.filters.customLsCompFilter || "";
-  const all = state.attack.dataComponents.slice().sort((a, b) => {
-    const sa = state.attack.dataSourceById.get(a.sourceId)?.name || "";
-    const sb = state.attack.dataSourceById.get(b.sourceId)?.name || "";
-    return sa.localeCompare(sb) || a.name.localeCompare(b.name);
-  });
-  const visible = all.filter(c => {
-    if (!filter) return true;
-    const sn = state.attack.dataSourceById.get(c.sourceId)?.name || "";
-    return (c.name + " " + sn).toLowerCase().includes(filter);
-  });
+  const all = state.attack.dataComponents.slice().sort((a, b) => a.name.localeCompare(b.name));
+  const visible = all.filter(c => !filter || c.name.toLowerCase().includes(filter));
   if (countEl) countEl.textContent = `${state.customLsComponentRefs.size} selected`;
   let html = "";
   for (const c of visible) {
     const checked = state.customLsComponentRefs.has(c.id) ? "checked" : "";
-    const sn = state.attack.dataSourceById.get(c.sourceId)?.name || "?";
     html += `<label class="component-pick">
       <input type="checkbox" data-comp-pick="${escapeAttr(c.id)}" ${checked} />
-      <span>${escapeHtml(c.name)} <span style="color:var(--muted);font-size:11px">/ ${escapeHtml(sn)}</span></span>
+      <span>${escapeHtml(c.name)}</span>
     </label>`;
   }
   if (visible.length === 0) html = `<div class="comp-meta" style="padding:6px">No components match "${escapeHtml(filter)}".</div>`;
@@ -460,8 +451,6 @@ function renderInventory() {
   const lsScores = lsScoresMemo();
 
   // Inventory summary spans the whole attack model (filter-independent).
-  const totalSources = state.attack.dataSources.length;
-  const scoredSources = state.attack.dataSources.filter(ds => getSourceScore(ds) > 0).length;
   const totalComps = state.attack.dataComponents.length;
   const scoredComps = Array.from(compScores.values()).filter(v => v.score > 0).length;
   const totalLogSources = state.attack.logSources?.length || 0;
@@ -471,7 +460,7 @@ function renderInventory() {
   // coverage, so surface the count as its own pill.
   const disabledLogSources = (state.inventory.log_sources || []).filter(e => e.enabled === false).length;
   if (summary) {
-    summary.className = "inv-summary" + ((scoredLogSources + scoredSources) > 0 ? " populated" : "");
+    summary.className = "inv-summary" + (scoredLogSources > 0 ? " populated" : "");
     summary.innerHTML = `
       <div class="pill"><strong>${scoredLogSources} / ${totalLogSources}</strong>log sources scored</div>
       <div class="pill"><strong>${scoredComps} / ${totalComps}</strong>data components covered</div>
@@ -552,7 +541,6 @@ function renderInventoryByComponent(root, lsScores) {
     if (onlyScored && scoredChannels === 0) continue;
     hierarchy.set(dc.id, {
       dc,
-      sourceName: state.attack.dataSourceById.get(dc.sourceId)?.name || "?",
       lsByName,
       totalChannels,
       scoredChannels,
@@ -619,7 +607,7 @@ function renderInventoryByComponent(root, lsScores) {
       <div class="ds-row" data-ds-id="${escapeAttr(expandKey)}">
         <div class="toggle" data-toggle="${escapeAttr(expandKey)}">${expanded ? "▾" : "▸"}</div>
         <div>
-          <div class="ds-name">${escapeHtml(h.dc.name)} <span style="color:var(--muted);font-weight:400">${escapeHtml(h.sourceName)}</span></div>
+          <div class="ds-name">${escapeHtml(h.dc.name)}</div>
           <div class="ds-meta">${h.scoredChannels} of ${h.totalChannels} channels active · ${h.lsByName.size} log source${h.lsByName.size === 1 ? "" : "s"}</div>
         </div>
         <div class="ds-meta">${h.totalChannels} channel${h.totalChannels === 1 ? "" : "s"}</div>
@@ -961,7 +949,6 @@ function renderComponents() {
       id: dc.id,
       stixId: dc.id,
       name: dc.name,
-      sourceName: state.attack.dataSourceById.get(dc.sourceId)?.name || "?",
       score,
       hasOverride: !!eff?.hasOverride,
       techCount: dc.techniqueIds.length,
@@ -987,18 +974,18 @@ function renderComponents() {
     `;
   }
   const rows = all.filter(c => {
-    if (filter && !(c.name.toLowerCase().includes(filter) || c.sourceName.toLowerCase().includes(filter))) return false;
+    if (filter && !c.name.toLowerCase().includes(filter)) return false;
     if (minScore === "0" && c.score !== 0) return false;
     if (minScore === "1" && c.score < 1) return false;
     if (minScore === "3" && c.score < 3) return false;
     return true;
-  }).sort((a, b) => b.score - a.score || a.sourceName.localeCompare(b.sourceName) || a.name.localeCompare(b.name));
+  }).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
 
   // chunk 12: colour-coded rows + expandable details so users can see
   // which log sources feed each component and which analytics
   // reference it. Coverage class drives a left-border + soft tint:
   //   covered (>=3) green, partial (1-2) amber, uncovered grey.
-  let html = `<div class="tech-row header"><div></div><div>Component</div><div>Category</div><div>Log sources / Analytics</div><div>Techniques</div><div>Score</div></div>`;
+  let html = `<div class="tech-row header"><div></div><div>Component</div><div>Log sources / Analytics</div><div>Techniques</div><div>Score</div></div>`;
   for (const c of rows.slice(0, 1500)) {
     const coverageCls = c.score >= 3 ? "comp-covered" : (c.score >= 1 ? "comp-partial" : "comp-uncovered");
     const expanded = state.expanded.has(`comp:${c.id}`);
@@ -1006,7 +993,6 @@ function renderComponents() {
       <div class="tech-row comp-row ${coverageCls}" data-comp-id="${escapeAttr(c.id)}">
         <div class="comp-toggle" data-comp-toggle="${escapeAttr(c.id)}" style="cursor:pointer;color:var(--muted)">${expanded ? "▾" : "▸"}</div>
         <div><strong>${escapeHtml(c.name)}</strong>${c.hasOverride ? ' <span class="cov-tag">scored</span>' : ' <span class="unc-tag">uncovered</span>'}</div>
-        <div style="color:var(--muted)">${escapeHtml(c.sourceName)}</div>
         <div style="color:var(--muted);font-size:11px">${c.logSourceCount} log src · ${c.analyticCount} analytic${c.analyticCount === 1 ? "" : "s"}</div>
         <div style="color:var(--muted);font-size:11px">${c.techCount} tech</div>
         <div><span class="score-badge s${c.score}">${c.score}</span></div>
@@ -1744,7 +1730,7 @@ function populateGraphSelectors() {
   const sel = $("#graphSourceSelect");
   if (sel.options.length <= 1 && state.attack) {
     sel.innerHTML = `<option value="">Select a component category…</option>` +
-      state.attack.dataSources.map(ds => `<option value="${escapeAttr(ds.id)}">${escapeHtml(ds.name)} (${escapeHtml(ds.attackId || "")})</option>`).join("");
+      state.attack.dataSources.map(ds => `<option value="${escapeAttr(ds.id)}">${escapeHtml(ds.name)}</option>`).join("");
   }
   if (state.graph.sourceId) sel.value = state.graph.sourceId;
 
@@ -1779,7 +1765,7 @@ function currentLayer() {
   return buildNavigatorLayer({
     coverage: cov,
     attack: state.attack,
-    name: $("#layerName").value || "Data source coverage",
+    name: $("#layerName").value || "Detection coverage",
     description: $("#layerDesc").value || "",
     colorMin: $("#colorMin").value,
     colorMax: $("#colorMax").value,
