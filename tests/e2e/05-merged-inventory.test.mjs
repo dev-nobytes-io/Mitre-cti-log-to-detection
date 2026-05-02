@@ -9,7 +9,9 @@
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { newPage, bootApp, ORIGIN, closeBrowser } from "../harness.mjs";
+import { newPage, bootApp, ORIGIN, SAMPLES_DIR, closeBrowser } from "../harness.mjs";
+
+const SAMPLES = SAMPLES_DIR;
 
 after(async () => { await closeBrowser(); });
 
@@ -231,6 +233,170 @@ test("merged inventory: data-flow diagram renders on details-open + re-renders a
   const populated = await page.evaluate(() =>
     document.querySelectorAll("#inventoryDiagramHost svg").length);
   assert.ok(populated >= 1, `diagram should render an SVG once a channel is scored, got ${populated}`);
+});
+
+// Helpers for chunk 5: pick a multi-channel analytic deterministically
+// so we can flip from "partial" (one channel scored) to "fullyMet"
+// (all channels scored) and assert greying / toggle behaviour.
+async function pickMultiChannelAnalytic(page) {
+  return await page.evaluate(async () => {
+    const [{ loadOfflineBundle }] = await Promise.all([import("/js/attack.js")]);
+    const attack = await loadOfflineBundle();
+    for (const an of (attack.analytics || [])) {
+      if ((an.logSourceIds || []).length < 2) continue;
+      const tuples = [];
+      let ok = true;
+      for (const id of an.logSourceIds) {
+        const ls = attack.logSourceById?.get(id);
+        if (!ls?.name || !ls?.channel) { ok = false; break; }
+        tuples.push({ name: ls.name, channel: ls.channel });
+      }
+      if (!ok) continue;
+      return { analyticName: an.name, tuples };
+    }
+    return null;
+  });
+}
+
+async function scoreInventoryFromApi(page, tuples, score = 5) {
+  await page.evaluate(async ({ tuples, score }) => {
+    const inv = await import("/js/inventory.js");
+    let cur = JSON.parse(localStorage.getItem("attack-inventory-v2") || "{}");
+    for (const t of tuples) {
+      cur = inv.setLogSourceScore(cur, t.name, t.channel, score);
+      cur = inv.setLogSourceEnabled(cur, t.name, t.channel, true);
+    }
+    inv.saveInventory(cur);
+  }, { tuples, score });
+}
+
+test("merged inventory: partial analytic appears greyed; full chain lights it up; toggle hides partials", async () => {
+  const page = await newPage({ blockExternal: true });
+  await bootMerged(page);
+  await page.click('button.tab[data-tab="inventory"]');
+  await page.waitForTimeout(150);
+
+  const target = await pickMultiChannelAnalytic(page);
+  assert.ok(target, "no multi-channel analytic in bundle");
+
+  // Score only the first channel — analytic should be partial.
+  await scoreInventoryFromApi(page, [target.tuples[0]], 5);
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForFunction(() => /Loaded \d+ (data sources|component categories)/.test(document.querySelector("#statusText")?.textContent || ""));
+  await page.click('button.tab[data-tab="inventory"]');
+  await page.waitForTimeout(200);
+
+  const partialState = await page.evaluate(() => ({
+    partial: document.querySelectorAll("#inventoryAnalytics .analytic-row.partial").length,
+    lit: document.querySelectorAll("#inventoryAnalytics .analytic-row.lit").length,
+  }));
+  assert.ok(partialState.partial >= 1, `expected >=1 partial analytic, got ${partialState.partial}`);
+
+  // Score every remaining channel of the analytic — it should flip to fullyMet.
+  await scoreInventoryFromApi(page, target.tuples.slice(1), 5);
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForFunction(() => /Loaded \d+ (data sources|component categories)/.test(document.querySelector("#statusText")?.textContent || ""));
+  await page.click('button.tab[data-tab="inventory"]');
+  await page.waitForTimeout(200);
+
+  const litState = await page.evaluate(() => ({
+    partial: document.querySelectorAll("#inventoryAnalytics .analytic-row.partial").length,
+    lit: document.querySelectorAll("#inventoryAnalytics .analytic-row.lit").length,
+    activeStrategies: document.querySelectorAll("#inventoryStrategies .strategy-card.lit").length,
+    detectedChips: document.querySelectorAll("#detectedTtps .ttp-chip").length,
+  }));
+  assert.ok(litState.lit >= 1, `expected >=1 lit analytic after scoring all channels, got ${litState.lit}`);
+  assert.ok(litState.activeStrategies >= 1, `expected >=1 active strategy, got ${litState.activeStrategies}`);
+  assert.ok(litState.detectedChips >= 1, `expected >=1 detected-TTP chip, got ${litState.detectedChips}`);
+});
+
+test("merged inventory: Ignore-incomplete toggle moves Coverage tab numbers (display + computation)", async () => {
+  const page = await newPage({ blockExternal: true });
+  await bootMerged(page);
+
+  // Set up: import threats + score one channel of a multi-channel
+  // analytic whose strategy detects a threat technique. With toggle
+  // OFF (inclusive default), partial strategies should light + bump
+  // the gaps-tab Covered count. Toggle ON should drop it back.
+  await page.click('button.tab[data-tab="threats"]');
+  await page.waitForTimeout(150);
+  await page.setInputFiles("#groupsFile", `${SAMPLES}/threats-state-apts.yaml`);
+  await page.waitForFunction(() => /Imported/.test(document.querySelector("#statusText")?.textContent || ""));
+  await page.waitForTimeout(150);
+
+  // Pick an analytic whose strategy detects a selected-threat technique.
+  const target = await page.evaluate(async () => {
+    const [{ loadOfflineBundle }, { selectedGroups }] = await Promise.all([
+      import("/js/attack.js"), import("/js/threats.js"),
+    ]);
+    const attack = await loadOfflineBundle();
+    const threats = JSON.parse(localStorage.getItem("attack-threats-v1") || "{}");
+    const groups = selectedGroups(threats, attack);
+    const threatTechIds = new Set();
+    for (const g of groups) for (const t of (g.techniqueIds || [])) threatTechIds.add(t);
+    const detectingStrats = (attack.detectionStrategies || []).filter(s =>
+      (s.techniqueIds || []).some(t => threatTechIds.has(t)));
+    for (const an of (attack.analytics || [])) {
+      if ((an.logSourceIds || []).length < 2) continue;
+      const inDetecting = detectingStrats.some(s => (s.analyticIds || []).includes(an.id));
+      if (!inDetecting) continue;
+      const tuples = [];
+      let ok = true;
+      for (const id of an.logSourceIds) {
+        const ls = attack.logSourceById?.get(id);
+        if (!ls?.name || !ls?.channel) { ok = false; break; }
+        tuples.push({ name: ls.name, channel: ls.channel });
+      }
+      if (ok && tuples.length >= 2) return { tuples };
+    }
+    return null;
+  });
+  assert.ok(target, "couldn't find a multi-channel analytic that detects a threat technique");
+
+  // Score ONLY the first channel — strategy is partial. Reload so the
+  // in-page state.inventory picks up the new entry.
+  await scoreInventoryFromApi(page, [target.tuples[0]], 5);
+  await page.reload({ waitUntil: "networkidle" });
+  await page.waitForFunction(() => /Loaded \d+ (data sources|component categories)/.test(document.querySelector("#statusText")?.textContent || ""));
+
+  // Toggle starts OFF (inclusive). Read Coverage with partials counted.
+  await page.click('button.tab[data-tab="gaps"]');
+  await page.waitForTimeout(200);
+  const inclusiveStats = await page.evaluate(() => {
+    const out = {};
+    for (const c of document.querySelectorAll("#threatStats .stat-card")) {
+      out[c.querySelector(".label")?.textContent?.trim()] = Number(c.querySelector(".value")?.textContent?.trim() || "0");
+    }
+    return out;
+  });
+
+  // Flip the toggle ON via the merged inventory tab and re-read.
+  await page.click('button.tab[data-tab="inventory"]');
+  await page.waitForTimeout(150);
+  await page.evaluate(() => {
+    const cb = document.querySelector("#mergedInvIgnoreIncomplete");
+    cb.checked = true;
+    cb.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await page.waitForTimeout(200);
+  await page.click('button.tab[data-tab="gaps"]');
+  await page.waitForTimeout(200);
+  const strictStats = await page.evaluate(() => {
+    const out = {};
+    for (const c of document.querySelectorAll("#threatStats .stat-card")) {
+      out[c.querySelector(".label")?.textContent?.trim()] = Number(c.querySelector(".value")?.textContent?.trim() || "0");
+    }
+    return out;
+  });
+
+  const inclusiveCoverage = (inclusiveStats["Covered"] || 0) + (inclusiveStats["Partial"] || 0);
+  const strictCoverage    = (strictStats["Covered"] || 0)    + (strictStats["Partial"] || 0);
+  assert.ok(inclusiveCoverage >= strictCoverage,
+    `inclusive (toggle OFF) coverage should be >= strict (toggle ON); got inclusive=${inclusiveCoverage} strict=${strictCoverage}`);
+  // For the chosen partial-only setup, inclusive must move at least one
+  // technique that strict doesn't.
+  assert.ok(inclusiveCoverage > strictCoverage,
+    `partial-only scoring should give inclusive coverage > strict; got inclusive=${inclusiveCoverage} strict=${strictCoverage}`);
 });
 
 test("localStorage.MERGED_INVENTORY=1 enables the merged panel without the URL flag", async () => {
