@@ -19,10 +19,25 @@ import {
   exportThreatsYaml, importThreatsYaml, importThreatsJson,
 } from "./threats.js";
 
+// Refactor-merge chunk 2: feature flag for the unified Log Inventory panel.
+// Reads ?merged=1 from the URL or localStorage.MERGED_INVENTORY=1. While
+// the flag is on, activateTab("inventory") routes to #tab-inventory-v2
+// instead of the legacy panel. Old tabs 2/3/4 stay default-on so the
+// scaffold ships without disturbing the live UI.
+function readMergedInventoryFlag() {
+  try {
+    const urlFlag = new URLSearchParams(location.search).get("merged");
+    if (urlFlag === "1" || urlFlag === "true") return true;
+    if (urlFlag === "0" || urlFlag === "false") return false;
+    return localStorage.getItem("MERGED_INVENTORY") === "1";
+  } catch (_) { return false; }
+}
+
 const state = {
   attack: null,
   inventory: loadInventory(),
   threats: loadThreats(),
+  mergedInventory: readMergedInventoryFlag(),
   filters: {
     ds: "",
     platform: "",
@@ -160,9 +175,15 @@ function checkVendorLibs() {
 // Tabs
 function activateTab(id) {
   $$(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === id));
-  $$(".panel").forEach(p => p.classList.toggle("active", p.id === `tab-${id}`));
+  // Refactor-merge chunk 2: when the merged-inventory flag is on,
+  // route the Log Inventory tab to the unified panel
+  // (#tab-inventory-v2). Tab buttons retain their original data-tab so
+  // the highlight still tracks the user's click.
+  const panelId = (id === "inventory" && state.mergedInventory) ? "inventory-v2" : id;
+  $$(".panel").forEach(p => p.classList.toggle("active", p.id === `tab-${panelId}`));
   const sel = $("#tabsMobile");
   if (sel && sel.value !== id) sel.value = id;
+  if (panelId === "inventory-v2") renderInventoryV2();
   if (id === "components") renderComponents();
   if (id === "coverage") renderCoverage();
   if (id === "graph") renderGraph();
@@ -476,6 +497,19 @@ function renderInventory() {
 }
 
 // chunk N: merged Data-Component → Log-Source → Channel hierarchy. Each
+// Refactor-merge chunk 2: stub renderer for the unified Log Inventory
+// panel. Activated when state.mergedInventory is true. Just keeps
+// the placeholder DOM in a consistent state for now — chunks 3-5
+// fill in the hierarchy / diagram / analytics / strategies / TTPs.
+function renderInventoryV2() {
+  const hier = $("#inventoryHierarchy");
+  if (hier) {
+    hier.innerHTML = state.attack
+      ? `<div style="padding:20px;color:var(--muted)">Hierarchy renders in chunk 3 — Data Component → Log Source → Channel.</div>`
+      : `<div style="padding:20px;color:var(--muted)">Load ATT&CK data first.</div>`;
+  }
+}
+
 // data component (Process Creation, File Modification, Logon Session
 // Creation, ...) groups the log-source names that feed it; each name
 // expands to the (name, channel) tuples the bundle declares for that
