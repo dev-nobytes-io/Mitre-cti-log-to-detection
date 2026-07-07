@@ -1,4 +1,5 @@
 import { loadAttack, loadAttackFromBundle, clearAttackCache, loadOfflineBundle } from "./attack.js";
+import { loadD3fendMitigations, attachD3fend } from "./d3fend.js";
 import {
   loadInventory, saveInventory, resetInventory,
   effectiveComponentScores, setSourceScore, setComponentScore, setAllSources,
@@ -213,7 +214,7 @@ $("#stixFile").addEventListener("change", async ev => {
     const text = await file.text();
     const bundle = JSON.parse(text);
     state.attack = loadAttackFromBundle(bundle, { domain: $("#domainSelect").value });
-    onAttackLoaded("file", { autoSwitch: true });
+    await onAttackLoaded("file", { autoSwitch: true });
   } catch (e) {
     console.error(e);
     setStatus(`Failed to read file: ${e.message}`, "error");
@@ -226,7 +227,7 @@ async function runLoad({ domain, url, force }) {
   setStatus("Loading ATT&CK…", "busy");
   try {
     state.attack = await loadAttack({ domain, url, force, onProgress: p => setStatus(p.message, "busy") });
-    onAttackLoaded(state.attack.meta.source, { autoSwitch: true });
+    await onAttackLoaded(state.attack.meta.source, { autoSwitch: true });
   } catch (e) {
     console.error("MITRE CTI fetch failed", e);
     setStatus(`MITRE CTI fetch failed: ${e.message}. Falling back to bundled offline ATT&CK.`, "error");
@@ -239,7 +240,7 @@ async function runLoad({ domain, url, force }) {
     );
     try {
       state.attack = await loadOfflineBundle();
-      onAttackLoaded("offline-bundle", { autoSwitch: true });
+      await onAttackLoaded("offline-bundle", { autoSwitch: true });
     } catch (e2) {
       setStatus(`Both online and offline ATT&CK failed: ${e2.message}`, "error");
       setBanner(`<strong>Couldn't load any ATT&CK data:</strong> ${escapeHtml(e2.message)}`, "error");
@@ -247,8 +248,26 @@ async function runLoad({ domain, url, force }) {
   }
 }
 
-function onAttackLoaded(source, opts = {}) {
+// D3FEND's ATT&CK-mitigations mapping is static reference data (not part
+// of the loaded ATT&CK bundle), so it's fetched once and reused across
+// every attack (re)load. A failure here is non-fatal — mitigations just
+// render without D3FEND sub-mitigations.
+let d3fendMappingsCache = null;
+async function attachD3fendSubMitigations(attack) {
+  if (!d3fendMappingsCache) {
+    try {
+      d3fendMappingsCache = await loadD3fendMitigations();
+    } catch (e) {
+      console.warn("D3FEND mitigation mapping failed to load", e);
+      d3fendMappingsCache = new Map();
+    }
+  }
+  attachD3fend(attack, d3fendMappingsCache);
+}
+
+async function onAttackLoaded(source, opts = {}) {
   const a = state.attack;
+  await attachD3fendSubMitigations(a);
   setStatus(`Loaded ${a.dataSources.length} component categories, ${a.techniques.length} techniques, ${a.groups?.length || 0} groups (${source})`, "ok");
   renderSetupSummary();
   populatePlatformFilter();
@@ -456,7 +475,7 @@ $("#inventoryFile").addEventListener("change", async ev => {
       setStatus("ATT&CK not loaded — using bundled offline ATT&CK so the import is visible…", "busy");
       try {
         state.attack = await loadOfflineBundle();
-        onAttackLoaded("offline-bundle");
+        await onAttackLoaded("offline-bundle");
       } catch (e2) {
         setBanner(`Inventory was saved, but the bundled ATT&CK failed to load (${escapeHtml(e2.message)}). Reload the page or upload a STIX bundle on tab 1.`, "error");
       }
@@ -1616,6 +1635,36 @@ function renderStrategyExpansion(strat, analyticDetail, detectedTechIds) {
   </div>`;
 }
 
+// Mitigations (M-IDs) that ATT&CK lists as mitigating this technique, each
+// with the D3FEND defensive techniques D3FEND documents as implementing
+// it (a "sub-mitigation" — more specific than the ATT&CK mitigation).
+// Mitigations D3FEND hasn't mapped yet render their `d3fendComment`
+// (D3FEND's own explanation, e.g. "outside the scope of D3FEND") instead
+// of an empty list.
+function renderMitigationExpansion(mitigationIds) {
+  const mitigations = mitigationIds
+    .map(id => state.attack.mitigationById?.get(id))
+    .filter(Boolean)
+    .sort((a, b) => a.attackId.localeCompare(b.attackId));
+  const blocks = mitigations.map(m => `
+    <div class="strat-an-block">
+      <div class="strat-an-h">
+        <span class="dot"></span>
+        <strong>${escapeHtml(m.name)}</strong>
+        <span style="color:var(--muted);font-size:11px;margin-left:6px">${escapeHtml(m.attackId)}</span>
+      </div>
+      ${(m.d3fend || []).length
+        ? `<div class="strat-tech-list" style="padding-left:18px">${m.d3fend.map(d => `<span class="strat-tech-chip" title="${escapeAttr(d.definition)}">${escapeHtml(d.id)} ${escapeHtml(d.name)}</span>`).join("")}</div>`
+        : `<div class="comp-meta" style="padding-left:18px">${escapeHtml(m.d3fendComment || "No D3FEND sub-mitigation mapped for this ATT&CK mitigation.")}</div>`}
+    </div>`).join("");
+  return `<div class="comp-expansion mit-expansion" style="grid-template-columns:1fr">
+    <div class="comp-section">
+      <div class="comp-section-h">Mitigations (ATT&amp;CK) &amp; D3FEND sub-mitigations</div>
+      ${blocks || `<div class="comp-meta">No mitigations linked.</div>`}
+    </div>
+  </div>`;
+}
+
 // --- Coverage tab ---
 $("#techFilter").addEventListener("input", e => { state.filters.tech = e.target.value.toLowerCase(); renderCoverage(); });
 $("#tacticFilter").addEventListener("change", e => { state.filters.tactic = e.target.value; renderCoverage(); });
@@ -1678,10 +1727,14 @@ function renderCoverage() {
   for (const r of rows.slice(0, 1500)) {
     const fillPct = Math.round(r.ratio * 100);
     const riskCls = r.riskAccepted ? " risk-accepted" : "";
+    const mitigationIds = state.attack.techniqueById?.get(r.stixId)?.mitigationIds || [];
+    const mitExpanded = state.expanded.has(`techmit:${r.attackId}`);
     html += `
       <div class="tech-row${riskCls}" title="${escapeAttr(`${r.coveredComponents}/${r.totalDetectingComponents} detecting components covered`)}">
         <div class="tech-id">${escapeHtml(r.attackId)}</div>
-        <div>${escapeHtml(r.name)}${r.isSubtechnique ? ' <span style="color:var(--muted);font-size:11px">sub</span>' : ""}${r.riskAccepted ? ' <span class="risk-accepted-tag" title="Risk accepted">✓ risk accepted</span>' : ""}</div>
+        <div>${escapeHtml(r.name)}${r.isSubtechnique ? ' <span style="color:var(--muted);font-size:11px">sub</span>' : ""}${r.riskAccepted ? ' <span class="risk-accepted-tag" title="Risk accepted">✓ risk accepted</span>' : ""}
+          ${mitigationIds.length ? `<div data-mit-toggle="${escapeAttr(r.attackId)}" style="cursor:pointer;color:var(--muted);font-size:11px;margin-top:2px">${mitExpanded ? "▾" : "▸"} ${mitigationIds.length} mitigation${mitigationIds.length === 1 ? "" : "s"}</div>` : ""}
+        </div>
         <div class="tech-tactics">${escapeHtml(r.tactics.join(", "))}</div>
         <div>
           <div class="coverage-bar"><div class="fill" style="width:${fillPct}%"></div></div>
@@ -1692,6 +1745,7 @@ function renderCoverage() {
           <button class="risk-toggle" data-risk-tech="${escapeAttr(r.attackId)}" title="${r.riskAccepted ? "Un-accept risk" : "Accept risk for this technique"}">${r.riskAccepted ? "↺" : "✓"}</button>
         </div>
       </div>
+      ${mitExpanded ? renderMitigationExpansion(mitigationIds) : ""}
     `;
   }
   if (rows.length > 1500) {
@@ -1707,6 +1761,14 @@ function renderCoverage() {
       setRiskAccepted(state.inventory, "techniques", id, accepted);
       saveInventory(state.inventory);
       refreshAll();
+    });
+  });
+  root.querySelectorAll("[data-mit-toggle]").forEach(el => {
+    el.addEventListener("click", () => {
+      const key = `techmit:${el.getAttribute("data-mit-toggle")}`;
+      if (state.expanded.has(key)) state.expanded.delete(key);
+      else state.expanded.add(key);
+      renderCoverage();
     });
   });
 }
@@ -2159,13 +2221,13 @@ function pct(n) { return `${Math.round((n || 0) * 100)}%`; }
   try {
     setStatus("Checking cache…", "busy");
     state.attack = await loadAttack({ domain: "enterprise-attack", cacheOnly: true });
-    onAttackLoaded("cache");
+    await onAttackLoaded("cache");
   } catch (e) {
     if (e.code === "NO_CACHE") {
       try {
         setStatus("Loading bundled offline ATT&CK…", "busy");
         state.attack = await loadOfflineBundle();
-        onAttackLoaded("offline-bundle");
+        await onAttackLoaded("offline-bundle");
         setBanner(
           `Loaded the <strong>bundled offline ATT&CK</strong> (38 component categories, 38 representative techniques, 20 groups). ` +
           `Click <em>Load / Refresh</em> on tab 1 (<em>MITRE CTI Data</em>) to upgrade to the live MITRE feed.`,
@@ -2189,7 +2251,7 @@ $("#runSampleAssessment")?.addEventListener("click", async () => {
   setStatus("Loading sample inventory + threats…", "busy");
   try {
     if (!state.attack) {
-      try { state.attack = await loadOfflineBundle(); onAttackLoaded("offline-bundle"); }
+      try { state.attack = await loadOfflineBundle(); await onAttackLoaded("offline-bundle"); }
       catch (_) { setStatus("Sample assessment needs ATT&CK data — load it on tab 1.", "error"); return; }
     }
     const [invText, threatsText] = await Promise.all([
