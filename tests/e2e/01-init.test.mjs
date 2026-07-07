@@ -156,6 +156,36 @@ test("offline bundle exposes ATT&CK mitigations (course-of-action + mitigates)",
   await page.context().close();
 });
 
+test("D3FEND sub-mitigation mappings load and attach onto ATT&CK mitigations", async () => {
+  // Additive parser chunk 2: js/d3fend.js loads the vendored ATT&CK
+  // Mitigations -> D3FEND mapping and merges D3FEND sub-mitigations onto
+  // the mitigations parsed from the ATT&CK bundle (chunk 1). No UI
+  // consumer yet.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  const direct = await page.evaluate(async () => {
+    const attackMod = await import("/js/attack.js");
+    const d3fendMod = await import("/js/d3fend.js");
+    const bundle = await (await fetch("/vendor/attack-offline.json")).json();
+    const a = attackMod.loadAttackFromBundle(bundle);
+    const d3fendByAttackId = await d3fendMod.loadD3fendMitigations();
+    d3fendMod.attachD3fend(a, d3fendByAttackId);
+    const m1032 = a.mitigationByAttackId.get("M1032");
+    const m1053 = a.mitigationByAttackId.get("M1053"); // Data Backup — real D3FEND mapping has no sub-techniques
+    return {
+      d3fendMitigationCount: d3fendByAttackId.size,
+      m1032D3fend: (m1032?.d3fend || []).map(d => d.id),
+      m1053D3fend: m1053?.d3fend || [],
+      everyMitigationHasD3fendArray: a.mitigations.every(m => Array.isArray(m.d3fend)),
+    };
+  });
+  assert.ok(direct.d3fendMitigationCount >= 40, `expected ~42 D3FEND mitigation entries, got ${direct.d3fendMitigationCount}`);
+  assert.ok(direct.m1032D3fend.includes("D3-MFA"), `expected M1032 to map to D3-MFA, got ${direct.m1032D3fend}`);
+  assert.deepEqual(direct.m1053D3fend, [], "M1053 (Data Backup) has no D3FEND sub-mitigations upstream");
+  assert.ok(direct.everyMitigationHasD3fendArray, "every mitigation should have a d3fend array, even if empty");
+  await page.context().close();
+});
+
 test("blocked MITRE fetch shows a warn banner and offline data still loads", async () => {
   // Real-world scenario: corporate proxy or TLS interception blocks
   // raw.githubusercontent.com. The page should not be left empty.
