@@ -129,6 +129,33 @@ test("offline bundle exposes v18+ log sources, analytics, and detection strategi
   await page.context().close();
 });
 
+test("offline bundle exposes ATT&CK mitigations (course-of-action + mitigates)", async () => {
+  // Additive parser chunk: attack.js indexes course-of-action objects and
+  // `mitigates` relationships alongside the existing detects/uses rels. No
+  // UI consumer yet — mirrors how log sources/analytics/strategies landed.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  const direct = await page.evaluate(async () => {
+    const mod = await import("/js/attack.js");
+    const r = await fetch("/vendor/attack-offline.json");
+    const bundle = await r.json();
+    const a = mod.loadAttackFromBundle(bundle);
+    const t1078 = a.techniqueByAttackId.get("T1078");
+    const m1032 = a.mitigationByAttackId.get("M1032");
+    return {
+      mitigations: a.mitigations.length,
+      sampleMitigation: a.mitigations[0] && { attackId: a.mitigations[0].attackId, name: a.mitigations[0].name },
+      t1078MitigationIds: (t1078?.mitigationIds || []).map(id => a.mitigationById.get(id)?.attackId).sort(),
+      m1032TechniqueIds: (m1032?.techniqueIds || []).map(id => a.techniqueById.get(id)?.attackId).sort(),
+    };
+  });
+  assert.equal(direct.mitigations, 26, `expected 26 mitigations, got ${direct.mitigations}`);
+  assert.match(direct.sampleMitigation?.attackId || "", /^M\d{4}$/, "mitigation attackId should look like M1234");
+  assert.ok(direct.t1078MitigationIds.includes("M1032"), `expected T1078 to be mitigated by M1032 (MFA), got ${direct.t1078MitigationIds}`);
+  assert.ok(direct.m1032TechniqueIds.includes("T1078"), `expected M1032 to mitigate T1078, got ${direct.m1032TechniqueIds}`);
+  await page.context().close();
+});
+
 test("blocked MITRE fetch shows a warn banner and offline data still loads", async () => {
   // Real-world scenario: corporate proxy or TLS interception blocks
   // raw.githubusercontent.com. The page should not be left empty.

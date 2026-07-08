@@ -294,6 +294,59 @@ for (const [aid, name, tactics, platforms, comps] of TECHNIQUES) {
   }
 }
 
+// ---------- mitigations (course-of-action) ----------
+// Representative subset of real ATT&CK Enterprise mitigations (not
+// exhaustive), picked to cover the TECHNIQUES above and to overlap with
+// the mitigation IDs D3FEND publishes sub-mitigations for (see
+// vendor/d3fend-mitigations.json).
+const MITIGATIONS = [
+  ["M1017","User Training",                        ["T1566"]],
+  ["M1018","User Account Management",               ["T1078","T1098","T1136","T1053","T1562"]],
+  ["M1021","Restrict Web-Based Content",             ["T1566","T1190"]],
+  ["M1022","Restrict File and Directory Permissions",["T1070","T1562","T1005"]],
+  ["M1024","Restrict Registry Permissions",          ["T1112","T1547"]],
+  ["M1026","Privileged Account Management",          ["T1078","T1098","T1053","T1068"]],
+  ["M1027","Password Policies",                      ["T1110","T1078"]],
+  ["M1028","Operating System Configuration",         ["T1053","T1490","T1547"]],
+  ["M1030","Network Segmentation",                   ["T1021","T1133","T1190","T1071","T1572","T1041"]],
+  ["M1031","Network Intrusion Prevention",           ["T1071","T1572","T1041","T1190"]],
+  ["M1032","Multi-factor Authentication",            ["T1078","T1110","T1021","T1133"]],
+  ["M1033","Limit Software Installation",            ["T1543","T1505"]],
+  ["M1035","Limit Access to Resource Over Network",  ["T1021","T1133"]],
+  ["M1036","Account Use Policies",                   ["T1110","T1078"]],
+  ["M1037","Filter Network Traffic",                 ["T1071","T1572","T1041"]],
+  ["M1038","Execution Prevention",                   ["T1059","T1218","T1547"]],
+  ["M1040","Behavior Prevention on Endpoint",        ["T1003","T1486","T1027"]],
+  ["M1041","Encrypt Sensitive Information",          ["T1005","T1070"]],
+  ["M1042","Disable or Remove Feature or Program",   ["T1059","T1218","T1562"]],
+  ["M1043","Credential Access Protection",           ["T1003"]],
+  ["M1045","Code Signing",                           ["T1543","T1505","T1027"]],
+  ["M1047","Audit",                                  ["T1547","T1098"]],
+  ["M1049","Antivirus/Antimalware",                  ["T1027","T1059","T1566"]],
+  ["M1050","Exploit Protection",                     ["T1190","T1068"]],
+  ["M1051","Update Software",                        ["T1190","T1068"]],
+  ["M1053","Data Backup",                            ["T1486","T1490","T1485"]],
+];
+
+let mitigatesCount = 0;
+for (const [mid, name, techs] of MITIGATIONS) {
+  const id = `course-of-action--${xid("m-"+mid)}`;
+  objects.push({
+    type: "course-of-action", id, name,
+    external_references: [{ source_name: "mitre-attack", external_id: mid }],
+  });
+  for (const t of techs) {
+    const tid = techIds[t];
+    if (!tid) continue;
+    objects.push({
+      type: "relationship",
+      id: `relationship--${xid("rm-"+(++mitigatesCount))}`,
+      relationship_type: "mitigates",
+      source_ref: id, target_ref: tid,
+    });
+  }
+}
+
 // ---------- analytics + detection strategies ----------
 // Each detection strategy groups one or more analytics; each analytic
 // references log sources via x_mitre_log_source_references[] (each entry
@@ -460,4 +513,4 @@ const bundle = {
 };
 
 writeFileSync(process.argv[2] || "/dev/stdout", JSON.stringify(bundle));
-console.error(`generated ${objects.length} STIX objects (${DATA_SOURCES.length} data sources, ${TECHNIQUES.length} techniques, ${GROUPS.length} groups, ${analyticCount} analytics, ${strategyCount} detection strategies)`);
+console.error(`generated ${objects.length} STIX objects (${DATA_SOURCES.length} data sources, ${TECHNIQUES.length} techniques, ${GROUPS.length} groups, ${analyticCount} analytics, ${strategyCount} detection strategies, ${MITIGATIONS.length} mitigations, ${mitigatesCount} mitigates relationships)`);

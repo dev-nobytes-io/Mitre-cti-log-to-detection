@@ -126,8 +126,10 @@ function indexBundle(bundle, meta) {
   const intrusionSets = [];        // intrusion-set (threat-actor groups)
   const analyticObjs = [];         // x-mitre-analytic (v18+)
   const detectionStrategyObjs = []; // x-mitre-detection-strategy (v18+)
+  const mitigationObjs = [];       // course-of-action
   const detectsRels = [];          // relationship type=detects
   const usesRels = [];             // relationship type=uses (group/software -> technique)
+  const mitigatesRels = [];        // relationship type=mitigates (course-of-action -> attack-pattern)
 
   for (const o of objects) {
     if (o.x_mitre_deprecated || o.revoked) continue;
@@ -139,9 +141,11 @@ function indexBundle(bundle, meta) {
       case "intrusion-set": intrusionSets.push(o); break;
       case "x-mitre-analytic": analyticObjs.push(o); break;
       case "x-mitre-detection-strategy": detectionStrategyObjs.push(o); break;
+      case "course-of-action": mitigationObjs.push(o); break;
       case "relationship":
         if (o.relationship_type === "detects") detectsRels.push(o);
         else if (o.relationship_type === "uses") usesRels.push(o);
+        else if (o.relationship_type === "mitigates") mitigatesRels.push(o);
         break;
     }
   }
@@ -173,6 +177,20 @@ function indexBundle(bundle, meta) {
     techniqueComponents.get(techId).add(compId);
     if (!componentTechniques.has(compId)) componentTechniques.set(compId, new Set());
     componentTechniques.get(compId).add(techId);
+  }
+
+  // Build mitigation <-> technique links (mitigates rels: source=course-of-action, target=attack-pattern)
+  const techniqueIdsAll = new Set(techniques.map(t => t.id));
+  const mitigationTechniqueIds = new Map(); // mitigationId -> Set(techniqueId)
+  const techniqueMitigationIds = new Map(); // techniqueId -> Set(mitigationId)
+  for (const r of mitigatesRels) {
+    if (!techniqueIdsAll.has(r.target_ref)) continue;
+    const src = byId.get(r.source_ref);
+    if (!src || src.type !== "course-of-action") continue;
+    if (!mitigationTechniqueIds.has(r.source_ref)) mitigationTechniqueIds.set(r.source_ref, new Set());
+    mitigationTechniqueIds.get(r.source_ref).add(r.target_ref);
+    if (!techniqueMitigationIds.has(r.target_ref)) techniqueMitigationIds.set(r.target_ref, new Set());
+    techniqueMitigationIds.get(r.target_ref).add(r.source_ref);
   }
 
   // ---- v18+ chain: log sources -> data components -> analytics -> detection strategies -> techniques ----
@@ -308,6 +326,7 @@ function indexBundle(bundle, meta) {
         tactics: tacticShortnames,
         componentIds: Array.from(techniqueComponents.get(t.id) || []),
         strategyIds: Array.from(techniqueStrategyIds.get(t.id) || []),
+        mitigationIds: Array.from(techniqueMitigationIds.get(t.id) || []),
       };
     })
     .filter(t => !!t.attackId)
@@ -334,6 +353,15 @@ function indexBundle(bundle, meta) {
     if (!techniqueGroups.has(r.target_ref)) techniqueGroups.set(r.target_ref, new Set());
     techniqueGroups.get(r.target_ref).add(r.source_ref);
   }
+
+  const mitigationList = mitigationObjs.map(m => ({
+    id: m.id,
+    stixId: m.id,
+    attackId: externalAttackId(m),
+    name: m.name,
+    description: m.description || "",
+    techniqueIds: Array.from(mitigationTechniqueIds.get(m.id) || []),
+  })).filter(m => m.attackId).sort((a, b) => a.attackId.localeCompare(b.attackId));
 
   const groupList = intrusionSets.map(g => ({
     id: g.id,
@@ -380,6 +408,7 @@ function indexBundle(bundle, meta) {
     logSources: logSourceList,
     analytics: analyticList,
     detectionStrategies: detectionStrategyList,
+    mitigations: mitigationList,
     // lookup helpers
     byId,
     componentById: new Map(dataSourceList.flatMap(ds => ds.components.map(c => [c.id, c]))),
@@ -391,6 +420,8 @@ function indexBundle(bundle, meta) {
     logSourceById: new Map(logSourceList.map(ls => [ls.id, ls])),
     analyticById: new Map(analyticList.map(a => [a.id, a])),
     detectionStrategyById: new Map(detectionStrategyList.map(s => [s.id, s])),
+    mitigationById: new Map(mitigationList.map(m => [m.id, m])),
+    mitigationByAttackId: new Map(mitigationList.map(m => [m.attackId, m])),
     techniqueGroups, // techniqueId -> Set(groupId)
   };
 }
