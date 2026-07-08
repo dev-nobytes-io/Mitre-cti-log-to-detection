@@ -8,6 +8,7 @@ import {
   setStrategyEnabled, isStrategyEnabled,
   setStrategyManuallyCovered, isStrategyManuallyCovered,
   setRiskAccepted, isRiskAccepted, logSourceRiskKey,
+  setMitigationScore, effectiveMitigationScores,
   exportYaml, importYaml, exportJson, importJson,
 } from "./inventory.js";
 import { computeCoverage, inclusiveAnalyticStrategyState, detectedTechniquesFromState } from "./coverage.js";
@@ -54,6 +55,8 @@ const state = {
     inventoryGrouping: "component", // chunk N: 'component' is the merged Data Component → Log Source → Channel hierarchy (default); 'name' groups every channel under its log-source name (alternate view)
     customLsCompFilter: "", // chunk 13: filter for the component picker on the manual-entry form
     mergedInvFilter: "", // refactor-merge chunk 3: filter for the merged inventory hierarchy
+    mitigationFilter: "", // filter for the Mitigations tab (id, name, technique)
+    mitigationOnlyScored: false, // Mitigations tab: hide unscored rows
   },
   // chunk 13: which data components the user has selected for the
   // custom log source they're about to add. Persists across opens of
@@ -131,6 +134,7 @@ function refreshAll() {
   renderGraph();
   renderExport();
   renderThreats();
+  renderMitigations();
 }
 
 // chunk 20: RAF-debounced refresh so a burst of toggles coalesces
@@ -192,6 +196,7 @@ function activateTab(id) {
   if (id === "graph") renderGraph();
   if (id === "export") renderExport();
   if (id === "threats" || id === "gaps") renderThreats();
+  if (id === "mitigations") renderMitigations();
 }
 $$(".tab").forEach(btn => btn.addEventListener("click", () => activateTab(btn.dataset.tab)));
 $("#tabsMobile")?.addEventListener("change", e => activateTab(e.target.value));
@@ -1936,6 +1941,115 @@ function renderGapAnalysis() {
 
 function statusClass(s) { return ({ gap: "s1", undetectable: "s2", partial: "s3", covered: "s5" })[s] || "s0"; }
 function statusLabel(s) { return ({ gap: "GAP", undetectable: "no-detect", partial: "partial", covered: "covered" })[s] || s; }
+
+// --- Mitigations tab ---
+// Preventive-control maturity scoring, independent of the detective
+// Log Source -> Analytic -> Strategy chain scored on tabs 2 and 4. Every
+// ATT&CK mitigation in the loaded bundle gets a 0-5 score; expanding a
+// row shows the techniques it applies to and its D3FEND sub-mitigations
+// (attached by attachD3fendSubMitigations() in onAttackLoaded()).
+$("#mitigationFilter")?.addEventListener("input", e => { state.filters.mitigationFilter = e.target.value.toLowerCase(); renderMitigations(); });
+$("#mitigationOnlyScored")?.addEventListener("change", e => { state.filters.mitigationOnlyScored = e.target.checked; renderMitigations(); });
+
+function renderMitigations() {
+  const root = $("#mitigationTable");
+  const stats = $("#mitigationStats");
+  if (!root) return;
+  if (!state.attack) {
+    root.innerHTML = `<div style="padding:20px;color:var(--muted)">Load ATT&amp;CK data first.</div>`;
+    if (stats) stats.innerHTML = "";
+    return;
+  }
+  const mitigations = (state.attack.mitigations || []).slice().sort((a, b) => a.attackId.localeCompare(b.attackId));
+  const scores = effectiveMitigationScores(state.inventory);
+  const scoredCount = mitigations.filter(m => (scores.get(m.attackId)?.score || 0) > 0).length;
+  const avgScore = scoredCount
+    ? mitigations.reduce((s, m) => s + (scores.get(m.attackId)?.score || 0), 0) / scoredCount
+    : 0;
+  const d3fendCount = mitigations.reduce((n, m) => n + (m.d3fend?.length || 0), 0);
+  if (stats) {
+    stats.innerHTML = `
+      <div class="stat-card"><div class="label">Mitigations</div><div class="value">${mitigations.length}</div></div>
+      <div class="stat-card"><div class="label">Scored</div><div class="value">${scoredCount}</div><div class="sub">${pct(scoredCount / Math.max(mitigations.length, 1))} assessed</div></div>
+      <div class="stat-card"><div class="label">Avg maturity</div><div class="value">${avgScore.toFixed(2)}</div><div class="sub">of scored</div></div>
+      <div class="stat-card"><div class="label">D3FEND sub-mitigations</div><div class="value">${d3fendCount}</div></div>
+    `;
+  }
+
+  const filter = (state.filters.mitigationFilter || "").trim();
+  const onlyScored = !!state.filters.mitigationOnlyScored;
+  const rows = mitigations.filter(m => {
+    const score = scores.get(m.attackId)?.score || 0;
+    if (onlyScored && score === 0) return false;
+    if (filter) {
+      const techIds = (m.techniqueIds || []).map(id => state.attack.techniqueById?.get(id)?.attackId || "").join(" ");
+      const hay = `${m.attackId} ${m.name} ${techIds}`.toLowerCase();
+      if (!hay.includes(filter)) return false;
+    }
+    return true;
+  });
+
+  let html = "";
+  for (const m of rows) {
+    const score = scores.get(m.attackId)?.score || 0;
+    const expanded = state.expanded.has(`mit:${m.attackId}`);
+    const techCount = (m.techniqueIds || []).length;
+    const d3Count = (m.d3fend || []).length;
+    html += `
+      <div class="ds-row" data-mit-id="${escapeAttr(m.attackId)}">
+        <div class="toggle" data-mit-row-toggle="${escapeAttr(m.attackId)}" style="cursor:pointer;color:var(--muted)">${expanded ? "▾" : "▸"}</div>
+        <div>
+          <div class="ds-name">${escapeHtml(m.name)} <span style="color:var(--muted);font-weight:400">${escapeHtml(m.attackId)}</span></div>
+          <div class="ds-meta">${techCount} technique${techCount === 1 ? "" : "s"} · ${d3Count} D3FEND sub-mitigation${d3Count === 1 ? "" : "s"}</div>
+        </div>
+        <div class="ds-meta">${score > 0 ? `score ${score}` : "not assessed"}</div>
+        <div>${scoreSelect(score, "mitigation", m.attackId)}</div>
+      </div>
+      ${expanded ? renderMitigationDetail(m) : ""}
+    `;
+  }
+  root.innerHTML = rows.length ? html : `<div style="padding:20px;color:var(--muted)">No mitigations match your filter.</div>`;
+
+  root.querySelectorAll("[data-mit-row-toggle]").forEach(el => {
+    el.addEventListener("click", () => {
+      const key = `mit:${el.getAttribute("data-mit-row-toggle")}`;
+      if (state.expanded.has(key)) state.expanded.delete(key);
+      else state.expanded.add(key);
+      renderMitigations();
+    });
+  });
+  root.querySelectorAll("select[data-kind='mitigation']").forEach(sel => {
+    sel.addEventListener("change", () => {
+      const id = sel.getAttribute("data-key");
+      setMitigationScore(state.inventory, id, Number(sel.value));
+      saveInventory(state.inventory);
+      refreshAll();
+    });
+  });
+}
+
+function renderMitigationDetail(m) {
+  const techs = (m.techniqueIds || [])
+    .map(id => state.attack.techniqueById?.get(id))
+    .filter(Boolean)
+    .sort((a, b) => a.attackId.localeCompare(b.attackId));
+  const techHtml = techs.length
+    ? `<div class="strat-tech-list">${techs.slice(0, 20).map(t => `<span class="strat-tech-chip">${escapeHtml(t.attackId)} <span style="color:var(--muted)">${escapeHtml(t.name || "")}</span></span>`).join("")}${techs.length > 20 ? `<span class="strat-tech-chip more">+${techs.length - 20} more</span>` : ""}</div>`
+    : `<div class="comp-meta">No linked techniques.</div>`;
+  const d3Html = (m.d3fend || []).length
+    ? `<div class="strat-tech-list">${m.d3fend.map(d => `<span class="strat-tech-chip" title="${escapeAttr(d.definition)}">${escapeHtml(d.id)} ${escapeHtml(d.name)}</span>`).join("")}</div>`
+    : `<div class="comp-meta">${escapeHtml(m.d3fendComment || "No D3FEND sub-mitigation mapped for this ATT&CK mitigation.")}</div>`;
+  return `<div class="comp-expansion">
+    <div class="comp-section">
+      <div class="comp-section-h">Techniques this mitigation applies to</div>
+      ${techHtml}
+    </div>
+    <div class="comp-section">
+      <div class="comp-section-h">D3FEND sub-mitigations</div>
+      ${d3Html}
+    </div>
+  </div>`;
+}
 
 // --- Relationships (mermaid) tab ---
 $("#graphSourceSelect").addEventListener("change", e => { state.graph.sourceId = e.target.value; renderGraph(); });

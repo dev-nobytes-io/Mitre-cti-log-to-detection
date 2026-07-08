@@ -664,3 +664,46 @@ test("importing on the Detection Strategies tab still updates that tab without a
   assert.ok(covered > 0, `Detection Strategies COVERED should be > 0 after import, got ${covered}`);
   await page.context().close();
 });
+
+test("Mitigations tab: scoring a mitigation persists and survives reload", async () => {
+  // Preventive-control (ATT&CK mitigation) maturity scoring is a separate
+  // dimension from the detective log-source/analytic/strategy chain
+  // scored elsewhere on this tab, but it's stored in the same inventory
+  // object and persists the same way (localStorage).
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  await activateTab(page, "mitigations");
+  await page.fill("#mitigationFilter", "M1032");
+  await page.waitForTimeout(150);
+
+  const rowBefore = await page.locator('[data-mit-id="M1032"]').innerText();
+  assert.match(rowBefore, /not assessed/, `expected M1032 to start unassessed, got: ${rowBefore}`);
+
+  await page.selectOption('select[data-kind="mitigation"][data-key="M1032"]', "4");
+  await page.waitForTimeout(150);
+  const rowAfter = await page.locator('[data-mit-id="M1032"]').innerText();
+  assert.match(rowAfter, /score 4/, `expected M1032 to show score 4 after selecting it, got: ${rowAfter}`);
+
+  // Stat cards should reflect the new score.
+  const stats = await page.locator("#mitigationStats").innerText();
+  assert.match(stats, /\n1\n/, `expected the Scored stat card to read 1, got: ${stats}`);
+
+  // Expanding shows the linked techniques and D3FEND sub-mitigation.
+  await page.click('[data-mit-row-toggle="M1032"]');
+  await page.waitForTimeout(150);
+  const expanded = await page.locator('[data-mit-id="M1032"] + .comp-expansion').innerText();
+  assert.match(expanded, /T1078/, `expected M1032's expansion to list T1078, got: ${expanded}`);
+  assert.match(expanded, /D3-MFA/, `expected M1032's expansion to list its D3FEND sub-mitigation D3-MFA, got: ${expanded}`);
+
+  // Score persists across a reload (same localStorage-backed inventory).
+  await page.reload();
+  await page.waitForSelector("#statusText");
+  await page.waitForTimeout(1200);
+  await activateTab(page, "mitigations");
+  await page.fill("#mitigationFilter", "M1032");
+  await page.waitForTimeout(150);
+  const rowAfterReload = await page.locator('[data-mit-id="M1032"]').innerText();
+  assert.match(rowAfterReload, /score 4/, `expected M1032's score to survive a reload, got: ${rowAfterReload}`);
+
+  await page.context().close();
+});

@@ -27,6 +27,7 @@
     <button class="tab" data-tab="coverage" role="tab">4. Detection Strategies</button>
     <button class="tab" data-tab="threats" role="tab">5. Threats</button>
     <button class="tab" data-tab="gaps" role="tab">6. Coverage</button>
+    <button class="tab" data-tab="mitigations" role="tab">Mitigations</button>
     <button class="tab" data-tab="graph" role="tab">Diagrams</button>
     <button class="tab" data-tab="export" role="tab">Export</button>
   </nav>
@@ -37,6 +38,7 @@
     <option value="coverage">4. Detection Strategies</option>
     <option value="threats">5. Threats</option>
     <option value="gaps">6. Coverage</option>
+    <option value="mitigations">Mitigations</option>
     <option value="graph">Diagrams</option>
     <option value="export">Export</option>
   </select>
@@ -353,6 +355,30 @@
         <button id="downloadGapLayer" class="primary">Download gap layer</button>
       </div>
       <div id="threatTable" class="tech-list"></div>
+    </section>
+
+    <section class="panel" id="tab-mitigations" role="tabpanel">
+      <h2>Mitigations</h2>
+      <p>Preventive controls (ATT&amp;CK mitigations) and the D3FEND sub-mitigations that implement them. Score how mature each control is in your environment — separate from the detective coverage on tab 4.</p>
+      <details class="tab-help">
+        <summary>📖 How to use this tab</summary>
+        <div class="tab-help-body">
+          <p><strong>What it does:</strong> lists every ATT&amp;CK mitigation (<code>course-of-action</code>) in the loaded bundle, the techniques it applies to, and the D3FEND defensive techniques D3FEND documents as implementing it (a "sub-mitigation" — more specific than the ATT&amp;CK mitigation). This is a <em>preventive</em>-control dimension, distinct from the <em>detective</em> Log Source → Analytic → Strategy chain scored on tabs 2 and 4.</p>
+          <p><strong>Steps:</strong></p>
+          <ol>
+            <li>Set a 0-5 maturity score per mitigation — how well is this control actually implemented in your environment? 0 = not implemented, 5 = excellent.</li>
+            <li>Expand a row to see its D3FEND sub-mitigations and which techniques it applies to.</li>
+            <li>Filter by name/ID, or toggle "only scored" to review what you've already assessed.</li>
+          </ol>
+          <p><strong>Capabilities:</strong> name/ID filter, only-scored toggle, per-mitigation 0-5 score. Scores persist with the rest of your inventory (YAML/JSON export on tab 2) and feed into the Coverage tab's per-technique picture.</p>
+        </div>
+      </details>
+      <div class="stats" id="mitigationStats"></div>
+      <div class="row">
+        <input type="search" id="mitigationFilter" placeholder="Filter mitigations (id, name, technique)&hellip;" />
+        <label><input type="checkbox" id="mitigationOnlyScored" /> Only scored</label>
+      </div>
+      <div id="mitigationTable" class="ds-list"></div>
     </section>
 
     <section class="panel" id="tab-graph" role="tabpanel">
