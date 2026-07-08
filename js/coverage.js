@@ -72,7 +72,7 @@ export function detectedTechniquesFromState(attack, state, { inclusive = false }
   return out;
 }
 
-export function computeCoverage(attack, logSourceScores, { analyticAggregation = "min", riskAccepted = null, disabledStrategies = null, manuallyCoveredStrategies = null, partialStrategiesLit = false } = {}) {
+export function computeCoverage(attack, logSourceScores, { analyticAggregation = "min", riskAccepted = null, disabledStrategies = null, manuallyCoveredStrategies = null, partialStrategiesLit = false, mitigationScores = null } = {}) {
   const isRisk = (kind, key) => !!(riskAccepted && riskAccepted[kind] && riskAccepted[kind][key]);
   const isStratDisabled = (sid) => !!(disabledStrategies && disabledStrategies[sid]);
   const isStratManual = (sid) => !!(manuallyCoveredStrategies && manuallyCoveredStrategies[sid]);
@@ -153,6 +153,23 @@ export function computeCoverage(attack, logSourceScores, { analyticAggregation =
     else if (litStrategies > 0) status = "partial";
     else status = "uncovered";
 
+    // Preventive-control (ATT&CK mitigation) dimension — additive only.
+    // Purely informational: it does not feed into `status`/`ratio`/
+    // `weightedScore` above, which stay strictly about detective
+    // (Log Source -> Analytic -> Strategy) coverage. `combinedScore` is
+    // a "defense in depth" view — a technique you can't detect but have
+    // strongly mitigated isn't undefended, and vice versa.
+    const mitigationIds = tech.mitigationIds || [];
+    // mitigationIds are STIX ids (course-of-action--...); mitigation_scores
+    // is keyed by the ATT&CK attackId (M1032) shown in the Mitigations tab.
+    const scoredMitigations = mitigationIds
+      .map(id => attack.mitigationById?.get(id)?.attackId)
+      .map(attackId => mitigationScores?.get(attackId)?.score || 0)
+      .filter(s => s > 0);
+    const mitigationScore = scoredMitigations.length ? Math.max(...scoredMitigations) : 0;
+    const mitigationCoverageRatio = mitigationIds.length ? scoredMitigations.length / mitigationIds.length : 0;
+    const combinedScore = Math.max(weightedScore, mitigationScore);
+
     return {
       attackId: tech.attackId,
       stixId: tech.id,
@@ -169,6 +186,11 @@ export function computeCoverage(attack, logSourceScores, { analyticAggregation =
       hasDetections: totalStrategies > 0,
       riskAccepted: riskAcceptedFlag,
       status,
+      // Preventive-control dimension (additive; see comment above).
+      mitigationIds,
+      mitigationScore,
+      mitigationCoverageRatio,
+      combinedScore,
       // Legacy aliases so navigator.js, threats.js, and existing UI keep
       // working without changes. coveringComponents maps each lit strategy
       // into the legacy {sourceName, componentName, score} tooltip slot.
@@ -191,6 +213,10 @@ export function computeCoverage(attack, logSourceScores, { analyticAggregation =
   const covered = detectable.filter(r => r.coveredComponents > 0 && !r.riskAccepted);
   const fully = detectable.filter(r => r.ratio >= 1 && !r.riskAccepted);
   const partial = detectable.filter(r => r.ratio > 0 && r.ratio < 1 && !r.riskAccepted);
+  // Preventive-control summary (additive; doesn't affect the buckets above).
+  const hasMitigations = rows.filter(r => r.mitigationIds.length > 0);
+  const mitigated = hasMitigations.filter(r => r.mitigationScore > 0);
+  const neitherDetectedNorMitigated = rows.filter(r => r.weightedScore === 0 && r.mitigationScore === 0 && !r.riskAccepted);
 
   return {
     rows,
@@ -202,6 +228,11 @@ export function computeCoverage(attack, logSourceScores, { analyticAggregation =
       partial: partial.length,
       riskAccepted: riskAcceptedRows.length,
       avgScore: covered.length ? covered.reduce((s, r) => s + r.weightedScore, 0) / covered.length : 0,
+      // Preventive-control (additive) stats.
+      hasMitigations: hasMitigations.length,
+      mitigated: mitigated.length,
+      avgMitigationScore: mitigated.length ? mitigated.reduce((s, r) => s + r.mitigationScore, 0) / mitigated.length : 0,
+      undefended: neitherDetectedNorMitigated.length,
     },
     engine: "v2",
   };

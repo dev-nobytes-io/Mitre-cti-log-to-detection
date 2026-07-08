@@ -115,6 +115,40 @@ test("Coverage tab: mitigations expand into ATT&CK mitigations + D3FEND sub-miti
   await page.context().close();
 });
 
+test("scoring a mitigation on the Mitigations tab feeds into the Coverage tab as an additive preventive-control dimension", async () => {
+  // Regression test: tech.mitigationIds holds STIX ids
+  // (course-of-action--m-1032) but inv.mitigation_scores is keyed by the
+  // ATT&CK attackId (M1032) shown in the Mitigations tab UI. coverage.js
+  // must resolve STIX id -> attackId before looking up the score, or the
+  // Coverage tab silently shows everything as unscored.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+
+  await activateTab(page, "coverage");
+  const statsBefore = await page.locator("#coverageStats").innerText();
+  assert.match(statsBefore, /MITIGATED\s*\n0\n/, `expected 0 mitigated before scoring anything, got: ${statsBefore}`);
+
+  await activateTab(page, "mitigations");
+  await page.selectOption('select[data-kind="mitigation"][data-key="M1032"]', "5");
+  await page.waitForTimeout(150);
+
+  await activateTab(page, "coverage");
+  const statsAfter = await page.locator("#coverageStats").innerText();
+  assert.match(statsAfter, /MITIGATED\s*\n[1-9]/, `expected MITIGATED > 0 after scoring M1032, got: ${statsAfter}`);
+  assert.match(statsAfter, /avg 5\.00/, `expected avg mitigation score of 5.00, got: ${statsAfter}`);
+
+  // The detective-only stat cards must be untouched by the mitigation
+  // score — this is an additive dimension, not a replacement.
+  assert.match(statsAfter, /COVERED\s*\n0\n/, "detective 'Covered' count should stay 0 — no log sources were scored");
+
+  await page.fill("#techFilter", "T1078");
+  await page.waitForTimeout(150);
+  const row = await page.locator('.tech-row:has-text("T1078")').first().innerText();
+  assert.match(row, /🛡5/, `expected T1078's row to show a mitigation score badge of 5, got: ${row}`);
+
+  await page.context().close();
+});
+
 test("risk-accepted technique drops out of the Gaps bucket and lands under Risk accepted", async () => {
   // chunk 10: marking a technique as risk-accepted on the Coverage tab
   // moves it from the gap bucket (in gap analysis) into a separate
