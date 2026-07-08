@@ -20,6 +20,9 @@
 //   data_sources: [               // v1 legacy block — still imported / exported
 //     { data_source_name, score, data_source: [{ name, score }], ... }
 //   ]
+//   mitigation_scores: {          // preventive-control maturity, keyed by
+//     "M1032": { score: 4, comment: "" }   // ATT&CK mitigation attackId
+//   }
 // }
 //
 // Coverage chain:
@@ -45,6 +48,10 @@ export function emptyInventory() {
     // have / can't get this and we accept the gap." Distinct from
     // score = 0 (haven't decided / haven't onboarded).
     risk_accepted: { log_sources: {}, components: {}, techniques: {}, groups: {} },
+    // Preventive-control maturity, keyed by ATT&CK mitigation id (M1032
+    // etc). Distinct from log_sources/detection scoring — this tracks
+    // how well a *mitigation* (not a detection) is implemented, 0..5.
+    mitigation_scores: {},
   };
 }
 
@@ -88,6 +95,7 @@ function migrate(inv) {
   }
   if (!inv.disabled_strategies) inv.disabled_strategies = {};
   if (!inv.manually_covered_strategies) inv.manually_covered_strategies = {};
+  if (!inv.mitigation_scores) inv.mitigation_scores = {};
   return inv;
 }
 
@@ -363,6 +371,35 @@ export function isStrategyManuallyCovered(inv, strategyId) {
   return !!inv.manually_covered_strategies[strategyId];
 }
 
+// Preventive-control (ATT&CK mitigation) maturity scoring. Keyed by
+// mitigation attackId (e.g. "M1032"), independent of the detective
+// Log Source -> Analytic -> Strategy chain scored above. A score of 0
+// (or no entry) means "not implemented / not assessed" — same
+// unscored-by-default convention as log sources.
+export function setMitigationScore(inv, mitigationId, score, comment) {
+  if (!mitigationId) return inv;
+  if (!inv.mitigation_scores) inv.mitigation_scores = {};
+  const clamped = clampScore(score);
+  const existing = inv.mitigation_scores[mitigationId];
+  inv.mitigation_scores[mitigationId] = {
+    score: clamped,
+    comment: comment !== undefined ? comment : (existing?.comment || ""),
+  };
+  return inv;
+}
+
+// Returns Map<mitigationId, { score:0..5, comment }>. Mitigations with
+// no saved entry are omitted — callers should treat a missing key as
+// score 0 (matches how effectiveLogSourceScores callers already treat
+// a missing map entry).
+export function effectiveMitigationScores(inv) {
+  const out = new Map();
+  for (const [id, entry] of Object.entries(inv.mitigation_scores || {})) {
+    out.set(id, { score: clampScore(entry?.score), comment: entry?.comment || "" });
+  }
+  return out;
+}
+
 // chunk 13: replace the component_refs[] for an existing log source
 // without touching its score / comment / enabled flag. Used by the
 // inventory tab's "Edit components" dialog on custom rows.
@@ -481,6 +518,7 @@ export function exportYaml(inv) {
     risk_accepted: inv.risk_accepted || { log_sources: {}, components: {}, techniques: {}, groups: {} },
     disabled_strategies: inv.disabled_strategies || {},
     manually_covered_strategies: inv.manually_covered_strategies || {},
+    mitigation_scores: inv.mitigation_scores || {},
   };
   // Use jsyaml from CDN (loaded globally)
   return window.jsyaml.dump(doc, { lineWidth: 120, noRefs: true });
@@ -552,6 +590,12 @@ function importDoc(doc) {
   }
   if (doc.manually_covered_strategies && typeof doc.manually_covered_strategies === "object") {
     inv.manually_covered_strategies = { ...doc.manually_covered_strategies };
+  }
+  if (doc.mitigation_scores && typeof doc.mitigation_scores === "object") {
+    inv.mitigation_scores = {};
+    for (const [id, entry] of Object.entries(doc.mitigation_scores)) {
+      inv.mitigation_scores[id] = { score: clampScore(entry?.score), comment: entry?.comment || "" };
+    }
   }
   return inv;
 }

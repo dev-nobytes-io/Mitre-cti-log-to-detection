@@ -186,6 +186,43 @@ test("D3FEND sub-mitigation mappings load and attach onto ATT&CK mitigations", a
   await page.context().close();
 });
 
+test("mitigation maturity scores persist and round-trip through export/import", async () => {
+  // Additive data-layer chunk: preventive-control (ATT&CK mitigation)
+  // scoring is independent of the detective log-source/analytic/strategy
+  // chain. No UI consumer yet.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  const result = await page.evaluate(async () => {
+    const inv = await import("/js/inventory.js");
+    let state = inv.emptyInventory();
+    inv.setMitigationScore(state, "M1032", 4, "Okta MFA everywhere");
+    inv.setMitigationScore(state, "M1053", 2);
+    const before = inv.effectiveMitigationScores(state);
+
+    const yaml = inv.exportYaml(state);
+    const reimported = inv.importYaml(yaml);
+    const afterYaml = inv.effectiveMitigationScores(reimported);
+
+    const json = inv.exportJson(state);
+    const reimportedJson = inv.importJson(json);
+    const afterJson = inv.effectiveMitigationScores(reimportedJson);
+
+    return {
+      beforeM1032: before.get("M1032"),
+      beforeM1053: before.get("M1053"),
+      afterYamlM1032: afterYaml.get("M1032"),
+      afterJsonM1032: afterJson.get("M1032"),
+      unscoredIsUndefined: before.get("M1099"),
+    };
+  });
+  assert.deepEqual(result.beforeM1032, { score: 4, comment: "Okta MFA everywhere" });
+  assert.deepEqual(result.beforeM1053, { score: 2, comment: "" });
+  assert.deepEqual(result.afterYamlM1032, { score: 4, comment: "Okta MFA everywhere" }, "YAML export/import should round-trip mitigation scores");
+  assert.deepEqual(result.afterJsonM1032, { score: 4, comment: "Okta MFA everywhere" }, "JSON export/import should round-trip mitigation scores");
+  assert.equal(result.unscoredIsUndefined, undefined, "an unscored mitigation should be absent from the map, not defaulted to 0");
+  await page.context().close();
+});
+
 test("blocked MITRE fetch shows a warn banner and offline data still loads", async () => {
   // Real-world scenario: corporate proxy or TLS interception blocks
   // raw.githubusercontent.com. The page should not be left empty.
