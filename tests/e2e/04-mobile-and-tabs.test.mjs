@@ -4,7 +4,7 @@ import { newPage, bootApp, activateTab, importInventory, closeBrowser } from "..
 
 after(async () => { await closeBrowser(); });
 
-const TABS = ["setup", "inventory", "components", "coverage", "threats", "gaps", "graph", "export"];
+const TABS = ["setup", "inventory", "components", "coverage", "threats", "gaps", "mitigations", "graph", "export"];
 
 test("on cold boot the MITRE CTI tab is the active panel (mobile + desktop)", async () => {
   // chunk N: previously onAttackLoaded auto-switched to the Inventory tab
