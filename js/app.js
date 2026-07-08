@@ -1443,6 +1443,7 @@ function runCoverage() {
       disabledStrategies: state.inventory.disabled_strategies || null,
       manuallyCoveredStrategies: state.inventory.manually_covered_strategies || null,
       partialStrategiesLit,
+      mitigationScores: effectiveMitigationScores(state.inventory),
     },
   );
 }
@@ -1647,25 +1648,31 @@ function renderStrategyExpansion(strat, analyticDetail, detectedTechIds) {
 // (D3FEND's own explanation, e.g. "outside the scope of D3FEND") instead
 // of an empty list.
 function renderMitigationExpansion(mitigationIds) {
+  const mitigationScores = effectiveMitigationScores(state.inventory);
   const mitigations = mitigationIds
     .map(id => state.attack.mitigationById?.get(id))
     .filter(Boolean)
     .sort((a, b) => a.attackId.localeCompare(b.attackId));
-  const blocks = mitigations.map(m => `
-    <div class="strat-an-block">
+  const blocks = mitigations.map(m => {
+    const score = mitigationScores.get(m.attackId)?.score || 0;
+    return `
+    <div class="strat-an-block${score > 0 ? " an-lit" : ""}">
       <div class="strat-an-h">
         <span class="dot"></span>
         <strong>${escapeHtml(m.name)}</strong>
         <span style="color:var(--muted);font-size:11px;margin-left:6px">${escapeHtml(m.attackId)}</span>
+        <span style="color:var(--muted);font-size:11px;margin-left:auto">${score > 0 ? `maturity ${score}/5` : "not assessed"}</span>
       </div>
       ${(m.d3fend || []).length
         ? `<div class="strat-tech-list" style="padding-left:18px">${m.d3fend.map(d => `<span class="strat-tech-chip" title="${escapeAttr(d.definition)}">${escapeHtml(d.id)} ${escapeHtml(d.name)}</span>`).join("")}</div>`
         : `<div class="comp-meta" style="padding-left:18px">${escapeHtml(m.d3fendComment || "No D3FEND sub-mitigation mapped for this ATT&CK mitigation.")}</div>`}
-    </div>`).join("");
+    </div>`;
+  }).join("");
   return `<div class="comp-expansion mit-expansion" style="grid-template-columns:1fr">
     <div class="comp-section">
       <div class="comp-section-h">Mitigations (ATT&amp;CK) &amp; D3FEND sub-mitigations</div>
       ${blocks || `<div class="comp-meta">No mitigations linked.</div>`}
+      <p class="comp-meta" style="margin-top:8px">Score maturity on the <a href="#" data-goto="mitigations">Mitigations tab</a>.</p>
     </div>
   </div>`;
 }
@@ -1702,6 +1709,8 @@ function renderCoverage() {
     <div class="stat-card"><div class="label">Manually covered</div><div class="value">${manualCount}</div><div class="sub">strategies claimed</div></div>
     <div class="stat-card"><div class="label">Risk accepted</div><div class="value">${cov.summary.riskAccepted || 0}</div><div class="sub">acknowledged gaps</div></div>
     <div class="stat-card"><div class="label">Avg score (covered)</div><div class="value">${cov.summary.avgScore.toFixed(2)}</div></div>
+    <div class="stat-card"><div class="label">Mitigated</div><div class="value">${cov.summary.mitigated || 0}</div><div class="sub">of ${cov.summary.hasMitigations || 0} with a mitigation, avg ${(cov.summary.avgMitigationScore || 0).toFixed(2)}</div></div>
+    <div class="stat-card"><div class="label">Undefended</div><div class="value">${cov.summary.undefended || 0}</div><div class="sub">no detection AND no mitigation scored</div></div>
   `;
 
   const ft = state.filters.tech;
@@ -1732,13 +1741,16 @@ function renderCoverage() {
   for (const r of rows.slice(0, 1500)) {
     const fillPct = Math.round(r.ratio * 100);
     const riskCls = r.riskAccepted ? " risk-accepted" : "";
-    const mitigationIds = state.attack.techniqueById?.get(r.stixId)?.mitigationIds || [];
+    const mitigationIds = r.mitigationIds || [];
     const mitExpanded = state.expanded.has(`techmit:${r.attackId}`);
+    const mitScoreLabel = mitigationIds.length
+      ? (r.mitigationScore > 0 ? `mitigation ${r.mitigationScore}` : "mitigations unscored")
+      : "";
     html += `
       <div class="tech-row${riskCls}" title="${escapeAttr(`${r.coveredComponents}/${r.totalDetectingComponents} detecting components covered`)}">
         <div class="tech-id">${escapeHtml(r.attackId)}</div>
         <div>${escapeHtml(r.name)}${r.isSubtechnique ? ' <span style="color:var(--muted);font-size:11px">sub</span>' : ""}${r.riskAccepted ? ' <span class="risk-accepted-tag" title="Risk accepted">✓ risk accepted</span>' : ""}
-          ${mitigationIds.length ? `<div data-mit-toggle="${escapeAttr(r.attackId)}" style="cursor:pointer;color:var(--muted);font-size:11px;margin-top:2px">${mitExpanded ? "▾" : "▸"} ${mitigationIds.length} mitigation${mitigationIds.length === 1 ? "" : "s"}</div>` : ""}
+          ${mitigationIds.length ? `<div data-mit-toggle="${escapeAttr(r.attackId)}" style="cursor:pointer;color:var(--muted);font-size:11px;margin-top:2px">${mitExpanded ? "▾" : "▸"} ${mitigationIds.length} mitigation${mitigationIds.length === 1 ? "" : "s"} <span style="opacity:0.8">(${escapeHtml(mitScoreLabel)})</span></div>` : ""}
         </div>
         <div class="tech-tactics">${escapeHtml(r.tactics.join(", "))}</div>
         <div>
@@ -1746,7 +1758,8 @@ function renderCoverage() {
           <div style="font-size:11px;color:var(--muted);margin-top:2px">${r.coveredComponents}/${r.totalDetectingComponents} (${fillPct}%)</div>
         </div>
         <div>
-          <span class="score-badge s${Math.round(r.weightedScore)}">${r.weightedScore.toFixed(2)}</span>
+          <span class="score-badge s${Math.round(r.weightedScore)}" title="Detective coverage score">${r.weightedScore.toFixed(2)}</span>
+          ${mitigationIds.length ? `<span class="score-badge s${Math.round(r.mitigationScore)}" title="Preventive mitigation score (max of scored mitigations)">🛡${r.mitigationScore}</span>` : ""}
           <button class="risk-toggle" data-risk-tech="${escapeAttr(r.attackId)}" title="${r.riskAccepted ? "Un-accept risk" : "Accept risk for this technique"}">${r.riskAccepted ? "↺" : "✓"}</button>
         </div>
       </div>
@@ -1775,6 +1788,9 @@ function renderCoverage() {
       else state.expanded.add(key);
       renderCoverage();
     });
+  });
+  root.querySelectorAll("[data-goto]").forEach(a => {
+    a.addEventListener("click", e => { e.preventDefault(); activateTab(a.dataset.goto); });
   });
 }
 
