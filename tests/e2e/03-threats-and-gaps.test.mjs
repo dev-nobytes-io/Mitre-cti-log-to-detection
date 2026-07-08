@@ -79,6 +79,42 @@ test("v2 coverage: importing inventory.example.yaml lights up at least one techn
   await page.context().close();
 });
 
+test("Coverage tab: mitigations expand into ATT&CK mitigations + D3FEND sub-mitigations", async () => {
+  // UI chunk: technique rows on the Coverage tab show a "N mitigations"
+  // toggle (populated from the course-of-action/mitigates parsing) that
+  // expands into each mitigation plus the D3FEND defensive techniques
+  // D3FEND documents as implementing it ("sub-mitigations").
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  await activateTab(page, "coverage");
+  await page.fill("#techFilter", "T1078");
+  await page.waitForTimeout(150);
+
+  const toggle = page.locator('[data-mit-toggle="T1078"]');
+  await assert.doesNotReject(toggle.waitFor({ state: "visible", timeout: 5000 }), "expected a mitigations toggle on the T1078 row");
+  await toggle.click();
+  await page.waitForTimeout(150);
+
+  const text = await page.locator("#techniqueTable").innerText();
+  assert.match(text, /Mitigations \(ATT&CK\) & D3FEND sub-mitigations/, "expected the mitigations expansion header");
+  assert.match(text, /Multi-factor Authentication/, "expected T1078's M1032 mitigation to be listed");
+  assert.match(text, /D3-MFA/, "expected M1032's D3FEND sub-mitigation (D3-MFA) to be listed");
+
+  // A mitigation D3FEND hasn't mapped yet (M1053 Data Backup, on
+  // T1486/T1490/T1485) should render D3FEND's own comment instead of an
+  // empty list.
+  await page.selectOption("#coverageFilter", "uncovered");
+  await page.fill("#techFilter", "T1490");
+  await page.waitForTimeout(150);
+  await page.click('[data-mit-toggle="T1490"]');
+  await page.waitForTimeout(150);
+  const t1490Text = await page.locator("#techniqueTable").innerText();
+  assert.match(t1490Text, /Data Backup/, "expected T1490's M1053 mitigation to be listed");
+  assert.match(t1490Text, /outside the .*scope of D3FEND|No D3FEND sub-mitigation/, "expected a fallback explanation for M1053, which D3FEND hasn't mapped");
+
+  await page.context().close();
+});
+
 test("risk-accepted technique drops out of the Gaps bucket and lands under Risk accepted", async () => {
   // chunk 10: marking a technique as risk-accepted on the Coverage tab
   // moves it from the gap bucket (in gap analysis) into a separate
