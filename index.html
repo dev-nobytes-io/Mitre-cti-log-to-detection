@@ -424,9 +424,9 @@
         <div class="tab-help-body">
           <p><strong>What it does:</strong> visual explainers for the coverage chain. Three sub-sections you can scroll between:</p>
           <ul>
-            <li><strong>Conceptual model</strong> — abstract diagram of how a raw log becomes a Navigator score. No interaction.</li>
+            <li><strong>Conceptual model</strong> — abstract diagram of how a raw log becomes a Navigator score, plus the parallel preventive-control chain (Mitigation → D3FEND sub-mitigation → NIST 800-53 / ISM control). No interaction.</li>
             <li><strong>Log source utility cascade</strong> — the most useful one. Pick log sources from the multi-select; the diagram renders <em>Log Source → Component → Analytic → Detection Strategy → Technique → Threat Group</em>. Lit (green) nodes are fully covered by your inventory; dim/yellow are blocked because at least one upstream log source is unscored. Use it to communicate <em>why</em> a particular event-code matters.</li>
-            <li><strong>Component category / technique drill-down</strong> — pick a component category or technique to see its components and detections.</li>
+            <li><strong>Component category / technique drill-down</strong> — pick a component category or technique to see its components and detections. The technique view also branches out every linked ATT&amp;CK mitigation with its D3FEND sub-mitigations (NIST/ISM controls folded into the label); green = scored on the Mitigations tab.</li>
           </ul>
           <p><strong>Capabilities:</strong> log-source multi-select with filter + "Select all visible", per-technique drill-down, smooth-fade re-renders. Diagrams scroll horizontally on phones.</p>
         </div>

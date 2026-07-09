@@ -143,6 +143,41 @@ test("Diagrams tab: log source utility cascade renders when log sources are pick
   await page.context().close();
 });
 
+test("Diagrams tab: conceptual model and per-technique view render the mitigation/D3FEND/NIST branch", async () => {
+  // The always-shown conceptual flowchart and the per-technique diagram
+  // both gained a preventive-control branch (mitigation -> D3FEND
+  // sub-mitigation, with NIST/ISM controls folded into its label)
+  // alongside the existing detective branch.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  await activateTab(page, "graph");
+  await page.waitForTimeout(400);
+
+  const conceptual = await page.evaluate(() => ({
+    svg: !!document.querySelector("#diagramConceptual svg"),
+    text: document.querySelector("#diagramConceptual")?.textContent || "",
+  }));
+  assert.ok(conceptual.svg, "expected an SVG in the always-shown conceptual diagram");
+  assert.match(conceptual.text, /ATT&CK Mitigation/, "conceptual diagram should show the mitigation branch");
+  assert.match(conceptual.text, /D3FEND Sub-mitigation/, "conceptual diagram should show the D3FEND branch");
+
+  // T1078 (Valid Accounts) has 5 mitigations in the offline bundle,
+  // several with D3FEND sub-mitigations that carry NIST controls.
+  await page.fill("#graphTechSearch", "T1078");
+  await page.dispatchEvent("#graphTechSearch", "change");
+  await page.waitForTimeout(400);
+  const tech = await page.evaluate(() => ({
+    svg: !!document.querySelector("#diagramTechnique svg"),
+    text: document.querySelector("#diagramTechnique")?.textContent || "",
+  }));
+  assert.ok(tech.svg, "expected an SVG in the per-technique diagram");
+  assert.match(tech.text, /M1032/, "expected the M1032 mitigation node");
+  assert.match(tech.text, /D3FEND D3-MFA/, "expected the D3-MFA sub-mitigation node");
+  assert.match(tech.text, /NIST (AC-2\(1\)|IA-2)/, "expected D3-MFA's NIST controls folded into its label");
+
+  await page.context().close();
+});
+
 test("mobile (390px): importing a sample renders readable inventory rows without horizontal overflow", async () => {
   // chunk M1: regression coverage for the user-reported "I see nothing
   // on mobile after loading sample data" bug. Asserts that on a phone-
