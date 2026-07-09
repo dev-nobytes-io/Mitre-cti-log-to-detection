@@ -86,6 +86,40 @@
         <a class="link-btn" href="samples/stix-mini-bundle.json" download>Sample mini-bundle</a>
       </div>
       <div id="setupSummary" class="summary"></div>
+      <details id="customMappingForm" class="custom-ls-form">
+        <summary>+ Add custom mitigations &amp; mappings by hand</summary>
+        <p class="diagram-help">For mitigations MITRE hasn't catalogued, or frameworks with no published ATT&amp;CK crosswalk at all — the Australian <strong>ISM</strong> has none. Add a mitigation of your own, then map it (or any existing ATT&amp;CK mitigation) to a technique, a D3FEND technique, a NIST SP 800-53 control, or an ISM control. Merged onto the loaded bundle live; persists with the rest of your inventory.</p>
+        <div class="row">
+          <label>New mitigation name <input type="text" id="customMitName" placeholder="Air-gapped backup vault…" /></label>
+          <label>Description <input type="text" id="customMitDescription" placeholder="optional" /></label>
+          <button id="customMitAdd" class="primary">Add mitigation</button>
+        </div>
+        <div class="row">
+          <label>Source (mitigation)
+            <select id="customRelSource"><option value="">Load ATT&amp;CK data first</option></select>
+          </label>
+          <label>Relation
+            <select id="customRelType">
+              <option value="mitigates">Mitigates a technique</option>
+              <option value="maps-to-d3fend">Maps to a D3FEND technique</option>
+              <option value="maps-to-nist">Maps to a NIST SP 800-53 control</option>
+              <option value="maps-to-ism">Maps to an ISM (Australian) control</option>
+            </select>
+          </label>
+          <span id="customRelTargetTechWrap">
+            <label>Target technique
+              <select id="customRelTargetTech"><option value="">Load ATT&amp;CK data first</option></select>
+            </label>
+          </span>
+          <span id="customRelTargetTextWrap" hidden>
+            <label>Target ID <input type="text" id="customRelTargetId" placeholder="ISM-1622, AC-2(1), D3-XYZ…" /></label>
+            <label>Target label <input type="text" id="customRelTargetLabel" placeholder="optional" /></label>
+          </span>
+          <label>Comment <input type="text" id="customRelComment" placeholder="optional" /></label>
+          <button id="customRelAdd" class="primary">Add mapping</button>
+        </div>
+        <div id="customMappingList" class="ds-list"></div>
+      </details>
     </section>
 
     <section class="panel" id="tab-inventory" role="tabpanel">
