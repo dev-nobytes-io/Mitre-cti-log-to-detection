@@ -2365,7 +2365,7 @@ function renderGraph() {
   // Technique -> components
   const tech = state.attack.techniqueById.get(state.graph.techStixId);
   if (tech) {
-    renderMermaidInto(techHost, techniqueDiagram({ technique: tech, attack: state.attack, componentScores: compScores }));
+    renderMermaidInto(techHost, techniqueDiagram({ technique: tech, attack: state.attack, componentScores: compScores, mitigationScores: effectiveMitigationScores(state.inventory) }));
   } else {
     techHost.innerHTML = `<div class="mermaid-empty">Search for a technique above (e.g. "T1059" or "PowerShell").</div>`;
   }

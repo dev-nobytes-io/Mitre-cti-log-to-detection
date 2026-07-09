@@ -12,12 +12,20 @@ export function conceptualDiagram() {
     tac["ATT&CK Tactic<br/>e.g. Execution"]:::tac
     nav[("Navigator layer<br/>score = max × ratio")]:::out
 
+    mit["ATT&CK Mitigation<br/>e.g. M1032"]:::mit
+    d3f["D3FEND Sub-mitigation<br/>e.g. D3-MFA"]:::d3f
+    ctrl["NIST 800-53 / ISM control<br/>e.g. AC-2(1) / ISM-1546"]:::ctrl
+
     log --> src
     src --> cmp
     cmp --> rel
     rel --> tech
     tech --> tac
     tech -. "weighted by your<br/>visibility score" .-> nav
+
+    mit -->|"mitigates<br/>(preventive, not detective)"| tech
+    mit -.->|"D3FEND sub-mitigation"| d3f
+    d3f -.->|"D3FEND/custom crosswalk"| ctrl
 
     classDef raw fill:#1e293b,stroke:#475569,color:#cbd5e1;
     classDef ds  fill:#1c2230,stroke:#2f81f7,color:#e6edf3;
@@ -26,6 +34,9 @@ export function conceptualDiagram() {
     classDef tech fill:#1d2b3b,stroke:#6ec1ff,color:#e6edf3;
     classDef tac fill:#2b1d3b,stroke:#a78bfa,color:#e6edf3;
     classDef out fill:#0e3a2a,stroke:#3fb950,color:#dcfce7;
+    classDef mit  fill:#1d3320,stroke:#7ee787,color:#e6edf3;
+    classDef d3f  fill:#241d3b,stroke:#a78bfa,color:#e6edf3;
+    classDef ctrl fill:#241d3b,stroke:#a78bfa,color:#e6edf3,stroke-dasharray: 3 3;
   `;
 }
 
@@ -76,8 +87,12 @@ export function sourceDiagram({ dataSource, attack, componentScores, maxTechniqu
   return lines.join("\n");
 }
 
-// Diagram for a single technique: components that detect it, with their parent data sources.
-export function techniqueDiagram({ technique, attack, componentScores }) {
+// Diagram for a single technique: components that detect it (with their
+// parent data sources) on the detective side, and mitigations (with their
+// D3FEND/NIST/ISM sub-mitigations) on the preventive side. `mitigationScores`
+// (from inventory.js's effectiveMitigationScores) is optional — pass it to
+// colour mitigation nodes by whether they've been scored.
+export function techniqueDiagram({ technique, attack, componentScores, mitigationScores }) {
   if (!technique) return null;
   const lines = ["flowchart RL"];
   const tNode = nodeId("T", technique.id);
@@ -86,28 +101,69 @@ export function techniqueDiagram({ technique, attack, componentScores }) {
   if (!technique.componentIds.length) {
     lines.push(`  none["No detecting data components defined"]:::more`);
     lines.push(`  none --> ${tNode}`);
-    lines.push(classDefs());
-    return lines.join("\n");
+  } else {
+    const sourcesSeen = new Set();
+    for (const cid of technique.componentIds) {
+      const dc = attack.componentById.get(cid);
+      if (!dc) continue;
+      const ds = attack.dataSourceById.get(dc.sourceId);
+      const cId = nodeId("C", dc.id);
+      const sId = nodeId("S", dc.sourceId);
+      const eff = componentScores.get(dc.id);
+      const score = eff?.score ?? 0;
+      const cCls = score > 0 ? "dcCov" : "dcUnc";
+      if (!sourcesSeen.has(dc.sourceId)) {
+        lines.push(`  ${sId}["${escape(ds?.name || "Unknown source")}"]:::ds`);
+        sourcesSeen.add(dc.sourceId);
+      }
+      lines.push(`  ${cId}["${escape(dc.name)}<br/><i>score ${score}</i>"]:::${cCls}`);
+      lines.push(`  ${cId} --> ${tNode}`);
+      lines.push(`  ${sId} --> ${cId}`);
+    }
   }
 
-  const sourcesSeen = new Set();
-  for (const cid of technique.componentIds) {
-    const dc = attack.componentById.get(cid);
-    if (!dc) continue;
-    const ds = attack.dataSourceById.get(dc.sourceId);
-    const cId = nodeId("C", dc.id);
-    const sId = nodeId("S", dc.sourceId);
-    const eff = componentScores.get(dc.id);
-    const score = eff?.score ?? 0;
-    const cCls = score > 0 ? "dcCov" : "dcUnc";
-    if (!sourcesSeen.has(dc.sourceId)) {
-      lines.push(`  ${sId}["${escape(ds?.name || "Unknown source")}"]:::ds`);
-      sourcesSeen.add(dc.sourceId);
+  // Preventive-control branch: mitigations -> technique, each with its
+  // D3FEND/NIST/ISM sub-mitigations. NIST controls are folded into the
+  // D3FEND node's label (rather than their own nodes) to keep the node
+  // count bounded — a single mitigation can carry 4+ NIST controls.
+  const mitigationIds = technique.mitigationIds || [];
+  if (mitigationIds.length) {
+    const mitScores = mitigationScores || new Map();
+    const MIT_CAP = 8;
+    const SUB_CAP = 12;
+    const capped = mitigationIds.slice(0, MIT_CAP);
+    let subCount = 0;
+    for (const mid of capped) {
+      const m = attack.mitigationById?.get(mid);
+      if (!m) continue;
+      const score = mitScores.get(m.attackId)?.score || 0;
+      const mNode = nodeId("M", m.id);
+      const mCls = score > 0 ? "mitLit" : "mitUnlit";
+      const idLabel = m.custom ? "custom" : m.attackId;
+      lines.push(`  ${mNode}["🛡 ${escape(idLabel)}<br/>${escape(truncate(m.name, 32))}<br/><i>${score > 0 ? "maturity " + score + "/5" : "not assessed"}</i>"]:::${mCls}`);
+      lines.push(`  ${mNode} --> ${tNode}`);
+      const subs = [
+        ...(m.d3fend || []).map(d => ({ kind: "D3FEND", id: d.id, nist: d.nist })),
+        ...(m.customD3fend || []).map(d => ({ kind: "D3FEND", id: d.id, nist: [] })),
+        ...(m.customNist || []).map(d => ({ kind: "NIST", id: d.id, nist: [] })),
+        ...(m.customIsm || []).map(d => ({ kind: "ISM", id: d.id, nist: [] })),
+      ];
+      for (const s of subs) {
+        if (subCount >= SUB_CAP) break;
+        const sNode = nodeId("D3", `${m.id}:${s.kind}:${s.id}`);
+        const nistLabel = s.nist?.length ? `<br/><i>NIST ${escape(s.nist.slice(0, 3).join(", "))}${s.nist.length > 3 ? "…" : ""}</i>` : "";
+        lines.push(`  ${sNode}["${escape(s.kind)} ${escape(s.id)}${nistLabel}"]:::d3sub`);
+        lines.push(`  ${mNode} --> ${sNode}`);
+        subCount++;
+      }
     }
-    lines.push(`  ${cId}["${escape(dc.name)}<br/><i>score ${score}</i>"]:::${cCls}`);
-    lines.push(`  ${cId} --> ${tNode}`);
-    lines.push(`  ${sId} --> ${cId}`);
+    if (mitigationIds.length > capped.length) {
+      const moreId = `${tNode}_mitmore`;
+      lines.push(`  ${moreId}(["+${mitigationIds.length - capped.length} more mitigations"]):::more`);
+      lines.push(`  ${moreId} --> ${tNode}`);
+    }
   }
+
   lines.push(classDefs());
   return lines.join("\n");
 }
@@ -321,6 +377,9 @@ function classDefs() {
     classDef techMain fill:#1d2b3b,stroke:#6ec1ff,color:#e6edf3,stroke-width:2px;
     classDef more  fill:#161b22,stroke:#30363d,color:#8b949e;
     classDef rel   fill:#3b2c1d,stroke:#d29922,color:#fef3c7;
+    classDef mitLit   fill:#0e3a2a,stroke:#7ee787,color:#dcfce7;
+    classDef mitUnlit fill:#1d3320,stroke:#7ee787,color:#e6edf3;
+    classDef d3sub fill:#241d3b,stroke:#a78bfa,color:#e6edf3;
   `;
 }
 
