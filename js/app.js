@@ -1,6 +1,10 @@
 import { loadAttack, loadAttackFromBundle, clearAttackCache, loadOfflineBundle } from "./attack.js";
 import { loadD3fendMitigations, attachD3fend } from "./d3fend.js";
 import {
+  RELATION_TYPES, addCustomMitigation, removeCustomObject,
+  addCustomRelation, removeCustomRelation, mergeCustomData,
+} from "./custom-mappings.js";
+import {
   loadInventory, saveInventory, resetInventory,
   effectiveComponentScores, setSourceScore, setComponentScore, setAllSources,
   effectiveLogSourceScores, setLogSourceScore, setAllLogSources, removeLogSource,
@@ -270,9 +274,17 @@ async function attachD3fendSubMitigations(attack) {
   attachD3fend(attack, d3fendMappingsCache);
 }
 
+// Re-runs whenever custom mappings are added/removed too (see the manual
+// mapping editor on tab 1) — mergeCustomData() is idempotent, so calling
+// it again just recomputes from the same pristine baseline.
+function applyCustomMappings(attack) {
+  mergeCustomData(attack, state.inventory);
+}
+
 async function onAttackLoaded(source, opts = {}) {
   const a = state.attack;
   await attachD3fendSubMitigations(a);
+  applyCustomMappings(a);
   setStatus(`Loaded ${a.dataSources.length} component categories, ${a.techniques.length} techniques, ${a.groups?.length || 0} groups (${source})`, "ok");
   renderSetupSummary();
   populatePlatformFilter();
