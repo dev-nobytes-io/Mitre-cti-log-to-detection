@@ -313,7 +313,7 @@ test("Run sample assessment + persistent help launcher + guided tour (chunk 16)"
   //      active and stat cards are populated.
   //   2. The persistent "?" help launcher (always visible) opens the
   //      active tab's <details class="tab-help"> block.
-  //   3. The guided tour overlay walks five steps; clicking through
+  //   3. The guided tour overlay walks six steps; clicking through
   //      auto-switches tabs.
   const page = await newPage({ blockExternal: true });
   await bootApp(page);
@@ -369,6 +369,53 @@ test("Run sample assessment + persistent help launcher + guided tour (chunk 16)"
   await page.waitForTimeout(150);
   const overlayHidden = await page.evaluate(() => document.querySelector("#tutorialOverlay")?.hidden);
   assert.equal(overlayHidden, true, "Skip should hide the overlay");
+
+  await page.context().close();
+});
+
+test("Run sample assessment seeds mitigation scores and the guided tour covers the Mitigations tab", async () => {
+  // The sample inventory (samples/inventory.example.yaml) now ships a
+  // mitigation_scores block alongside its log_sources, so the one-click
+  // demo shows the preventive-control dimension without extra setup.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  await activateTab(page, "setup");
+  await page.click("#runSampleAssessment");
+  await page.waitForFunction(() => /Sample assessment loaded/.test(document.querySelector("#statusText")?.textContent || ""));
+  await page.waitForTimeout(300);
+
+  const bannerText = await page.locator("#globalBanner").innerText();
+  assert.match(bannerText, /Mitigations tab/, `expected the post-sample banner to mention the Mitigations tab, got: ${bannerText}`);
+
+  // The example threat groups (including APT29, which uses T1566
+  // Phishing — undetectable in the offline bundle but mitigated by the
+  // now-scored M1017) should produce at least one mitigated gap.
+  const mitigatedGaps = await page.evaluate(() => {
+    const card = Array.from(document.querySelectorAll("#threatStats .stat-card")).find(c => c.querySelector(".label")?.textContent?.includes("Mitigated gaps"));
+    return Number(card?.querySelector(".value")?.textContent || "0");
+  });
+  assert.ok(mitigatedGaps > 0, `expected the sample scenario to produce at least one mitigated gap, got ${mitigatedGaps}`);
+
+  // Banner's Mitigations link works and shows scored mitigations.
+  await page.click('#globalBanner [data-goto="mitigations"]');
+  await page.waitForTimeout(200);
+  const scored = await page.evaluate(() => {
+    const card = Array.from(document.querySelectorAll("#mitigationStats .stat-card")).find(c => c.querySelector(".label")?.textContent?.includes("Scored"));
+    return Number(card?.querySelector(".value")?.textContent || "0");
+  });
+  assert.ok(scored >= 6, `expected >= 6 pre-scored sample mitigations, got ${scored}`);
+
+  // Guided tour now has a 6th step landing on the Mitigations tab.
+  await activateTab(page, "setup");
+  await page.click("#startTutorial");
+  for (let i = 0; i < 5; i++) await page.click("#tutorialNext");
+  await page.waitForTimeout(150);
+  const step6 = await page.evaluate(() => ({
+    stepNum: document.querySelector("#tutorialStepNum")?.textContent,
+    mitigationsActive: document.querySelector("#tab-mitigations")?.classList.contains("active"),
+  }));
+  assert.equal(step6.stepNum, "6");
+  assert.equal(step6.mitigationsActive, true, "tour step 6 should switch to the Mitigations tab");
 
   await page.context().close();
 });
