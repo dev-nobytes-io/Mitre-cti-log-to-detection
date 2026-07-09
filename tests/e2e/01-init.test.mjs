@@ -229,6 +229,68 @@ test("mitigation maturity scores persist and round-trip through export/import", 
   await page.context().close();
 });
 
+test("custom mappings: add a custom mitigation + ISM/technique relations, merge idempotently, round-trip through export", async () => {
+  // Additive data-layer chunk: js/custom-mappings.js lets the app model
+  // frameworks with no published ATT&CK crosswalk (ISM has none at all)
+  // via user-entered objects/relations, merged onto the loaded AttackData
+  // without mutating the original STIX-parsed data. No UI consumer yet.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  const result = await page.evaluate(async () => {
+    const attackMod = await import("/js/attack.js");
+    const invMod = await import("/js/inventory.js");
+    const cm = await import("/js/custom-mappings.js");
+    const bundle = await (await fetch("/vendor/attack-offline.json")).json();
+    const attack = attackMod.loadAttackFromBundle(bundle);
+    const inv = invMod.emptyInventory();
+
+    const t1486 = attack.techniqueByAttackId.get("T1486");
+    const mid = cm.addCustomMitigation(inv, { name: "Air-gapped backup vault", description: "Offline immutable backups" });
+    cm.addCustomRelation(inv, { sourceRef: mid, relation: "mitigates", targetRef: t1486.id, targetLabel: "T1486" });
+    cm.addCustomRelation(inv, { sourceRef: mid, relation: "maps-to-ism", targetRef: "ISM-1622", targetLabel: "Backup and recovery" });
+    // M1032 is a real, STIX-parsed mitigation — custom relations must not
+    // disturb its existing official D3FEND data.
+    const m1032Before = attack.mitigationByAttackId.get("M1032");
+    const officialD3fendBefore = (m1032Before.d3fend || []).length;
+    cm.addCustomRelation(inv, { sourceRef: "course-of-action--m-1032", relation: "maps-to-ism", targetRef: "ISM-0974", targetLabel: "MFA control" });
+
+    cm.mergeCustomData(attack, inv);
+    cm.mergeCustomData(attack, inv); // twice on purpose — must not double up
+
+    const custom = attack.mitigationById.get(mid);
+    const m1032After = attack.mitigationByAttackId.get("M1032");
+
+    // Round-trip through YAML and JSON.
+    const yaml = invMod.exportYaml(inv);
+    const reimportedYaml = invMod.importYaml(yaml);
+    const json = invMod.exportJson(inv);
+    const reimportedJson = invMod.importJson(json);
+
+    return {
+      totalMitigations: attack.mitigations.length,
+      customTechniqueIds: custom?.techniqueIds || [],
+      customIsm: custom?.customIsm || [],
+      t1486MitigationIds: (attack.techniqueByAttackId.get("T1486")?.mitigationIds || []),
+      officialD3fendBefore,
+      officialD3fendAfter: (m1032After.d3fend || []).length,
+      m1032CustomIsm: m1032After.customIsm || [],
+      yamlObjectCount: reimportedYaml.custom_objects.length,
+      yamlRelationCount: reimportedYaml.custom_relations.length,
+      jsonObjectCount: reimportedJson.custom_objects.length,
+    };
+  });
+  assert.equal(result.totalMitigations, 27, `expected 26 real + 1 custom mitigation, got ${result.totalMitigations}`);
+  assert.deepEqual(result.customTechniqueIds, ["attack-pattern--ap-1486"]);
+  assert.deepEqual(result.customIsm, [{ id: "ISM-1622", name: "Backup and recovery", custom: true }]);
+  assert.ok(result.t1486MitigationIds.some(id => id.startsWith("custom-mitigation-")), `expected T1486 to be linked to the custom mitigation, got ${result.t1486MitigationIds}`);
+  assert.equal(result.officialD3fendAfter, result.officialD3fendBefore, "a custom ISM relation on M1032 must not disturb its official D3FEND data");
+  assert.deepEqual(result.m1032CustomIsm, [{ id: "ISM-0974", name: "MFA control", custom: true }]);
+  assert.equal(result.yamlObjectCount, 1, "custom_objects should round-trip through YAML");
+  assert.equal(result.yamlRelationCount, 3, "custom_relations should round-trip through YAML");
+  assert.equal(result.jsonObjectCount, 1, "custom_objects should round-trip through JSON");
+  await page.context().close();
+});
+
 test("blocked MITRE fetch shows a warn banner and offline data still loads", async () => {
   // Real-world scenario: corporate proxy or TLS interception blocks
   // raw.githubusercontent.com. The page should not be left empty.

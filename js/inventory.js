@@ -23,6 +23,11 @@
 //   mitigation_scores: {          // preventive-control maturity, keyed by
 //     "M1032": { score: 4, comment: "" }   // ATT&CK mitigation attackId
 //   }
+//   custom_objects: [ { id, type: "mitigation", name, description } ]
+//   custom_relations: [
+//     { id, sourceRef, relation: "mitigates"|"maps-to-d3fend"|"maps-to-nist"|"maps-to-ism",
+//       targetRef, targetLabel, comment }
+//   ]
 // }
 //
 // Coverage chain:
@@ -52,6 +57,11 @@ export function emptyInventory() {
     // etc). Distinct from log_sources/detection scoring — this tracks
     // how well a *mitigation* (not a detection) is implemented, 0..5.
     mitigation_scores: {},
+    // User-entered entities and relations for frameworks/controls the
+    // loaded bundle and vendored D3FEND data don't cover (e.g. ISM, which
+    // has no published ATT&CK crosswalk at all) — see js/custom-mappings.js.
+    custom_objects: [],
+    custom_relations: [],
   };
 }
 
@@ -96,6 +106,8 @@ function migrate(inv) {
   if (!inv.disabled_strategies) inv.disabled_strategies = {};
   if (!inv.manually_covered_strategies) inv.manually_covered_strategies = {};
   if (!inv.mitigation_scores) inv.mitigation_scores = {};
+  if (!Array.isArray(inv.custom_objects)) inv.custom_objects = [];
+  if (!Array.isArray(inv.custom_relations)) inv.custom_relations = [];
   return inv;
 }
 
@@ -519,6 +531,8 @@ export function exportYaml(inv) {
     disabled_strategies: inv.disabled_strategies || {},
     manually_covered_strategies: inv.manually_covered_strategies || {},
     mitigation_scores: inv.mitigation_scores || {},
+    custom_objects: inv.custom_objects || [],
+    custom_relations: inv.custom_relations || [],
   };
   // Use jsyaml from CDN (loaded globally)
   return window.jsyaml.dump(doc, { lineWidth: 120, noRefs: true });
@@ -596,6 +610,19 @@ function importDoc(doc) {
     for (const [id, entry] of Object.entries(doc.mitigation_scores)) {
       inv.mitigation_scores[id] = { score: clampScore(entry?.score), comment: entry?.comment || "" };
     }
+  }
+  if (Array.isArray(doc.custom_objects)) {
+    inv.custom_objects = doc.custom_objects
+      .filter(o => o && o.id && o.type)
+      .map(o => ({ id: o.id, type: o.type, name: o.name || o.id, description: o.description || "" }));
+  }
+  if (Array.isArray(doc.custom_relations)) {
+    inv.custom_relations = doc.custom_relations
+      .filter(r => r && r.id && r.sourceRef && r.relation)
+      .map(r => ({
+        id: r.id, sourceRef: r.sourceRef, relation: r.relation,
+        targetRef: r.targetRef || "", targetLabel: r.targetLabel || "", comment: r.comment || "",
+      }));
   }
   return inv;
 }
