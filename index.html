@@ -370,10 +370,11 @@
           <ol>
             <li>Make sure you've scored an inventory on tab 2 and ticked at least one group on tab 5.</li>
             <li>Read the stat cards: <em>Threat techniques</em> = total your selected groups use; <em>Covered</em> = you'd detect; <em>Partial</em> = you'd detect some occurrences; <em>Gaps</em> = you can detect in principle but don't; <em>Undetectable</em> = no detections defined in the bundle for it; <em>Risk accepted</em> = you've explicitly acknowledged the gap on tab 4.</li>
+            <li><strong>Mitigated gaps</strong> — of the techniques with no detection, how many have a scored ATT&amp;CK mitigation (tab "Mitigations") anyway. A row with a 🛡 badge in the <em>Gap</em> bucket isn't undefended, just undetected — you'd want to know if it's exploited, but a preventive control is already in place. This is additive: it doesn't move the row out of <em>Gap</em>, just adds context.</li>
             <li>Filter by status to focus on gaps or partials.</li>
             <li>Download <em>Threat-groups overlay</em> (score = number of selected groups using each technique) or <em>Gap layer</em> (score = uncovered weight × group count) Navigator layers.</li>
           </ol>
-          <p><strong>Capabilities:</strong> per-status filtering, two distinct Navigator-layer exports.</p>
+          <p><strong>Capabilities:</strong> per-status filtering, two distinct Navigator-layer exports, per-row mitigation badge.</p>
         </div>
       </details>
       <div class="stats" id="threatStats"></div>

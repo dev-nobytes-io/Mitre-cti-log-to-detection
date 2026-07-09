@@ -117,6 +117,12 @@ export function gapAnalysis(threats, attack, coverageRowsByStixId) {
     else if (weighted <= 0) status = "gap";
     else if (ratio >= 1) status = "covered";
     else status = "partial";
+    // Preventive-control dimension — copied straight off the coverage row
+    // computeCoverage() already attached it to (additive there too; see
+    // coverage.js). Lets a "gap" (no detection) be reframed as "mitigated
+    // but undetected" rather than a bare, undifferentiated red flag.
+    const mitigationIds = cov?.mitigationIds || [];
+    const mitigationScore = cov?.mitigationScore || 0;
     rows.push({
       tech,
       groups: gs,
@@ -126,6 +132,12 @@ export function gapAnalysis(threats, attack, coverageRowsByStixId) {
       hasDetections: detectable,
       riskAccepted,
       status,
+      mitigationIds,
+      mitigationScore,
+      // Covers both flavors of "no effective detection right now" — a
+      // detectable-in-principle gap and a technique the bundle has no
+      // detection modeled for at all.
+      mitigatedGap: (status === "gap" || status === "undetectable") && mitigationScore > 0,
     });
   }
   rows.sort((a, b) => {
@@ -141,6 +153,8 @@ export function gapAnalysis(threats, attack, coverageRowsByStixId) {
     gaps: rows.filter(r => r.status === "gap").length,
     undetectable: rows.filter(r => r.status === "undetectable").length,
     riskAccepted: rows.filter(r => r.status === "risk_accepted").length,
+    // Preventive-control overlay (additive; doesn't change the buckets above).
+    mitigatedGaps: rows.filter(r => r.mitigatedGap).length,
   };
   return { groups, threatTechniques: rows, summary };
 }
