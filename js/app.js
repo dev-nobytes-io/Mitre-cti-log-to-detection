@@ -2590,7 +2590,8 @@ $("#runSampleAssessment")?.addEventListener("click", async () => {
     refreshAll();
     activateTab("gaps");
     setStatus("Sample assessment loaded — see the Coverage tab.", "ok");
-    setBanner(`<strong>Sample assessment loaded.</strong> The example inventory (sysmon, powershell, windows-security, zeek, …) is scored, the example threat groups are picked. The Coverage tab now shows what those groups can / can't be detected with this telemetry.`, "ok");
+    setBanner(`<strong>Sample assessment loaded.</strong> The example inventory (sysmon, powershell, windows-security, zeek, …) is scored, a handful of ATT&CK mitigations are pre-scored (see the <a href="#" data-goto="mitigations">Mitigations tab</a>), and the example threat groups are picked. The Coverage tab now shows what those groups can / can't be detected with this telemetry — including which undetected techniques are still mitigated.`, "ok");
+    $("#globalBanner")?.querySelectorAll("[data-goto]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); activateTab(a.dataset.goto); }));
   } catch (e) {
     console.error("Sample assessment failed", e);
     setStatus(`Sample assessment failed: ${e.message}`, "error");
@@ -2632,6 +2633,8 @@ const TUTORIAL_STEPS = [
     body: "Tab 5 lists MITRE ATT&CK threat-actor groups (APT29, FIN7, …). Tick the ones that matter to your org — the Coverage tab will cross-reference what those groups do against what you can catch." },
   { tab: "gaps",      title: "5. Read the gap analysis",
     body: "Tab 6 cross-references your inventory against the picked threats. Gaps are techniques you can detect in principle but don't. Risk-accepted techniques (✓ on tab 4) are acknowledged gaps in their own bucket. Export the Navigator layer for a heatmap." },
+  { tab: "mitigations", title: "6. Score preventive controls",
+    body: "The Mitigations tab lists every ATT&CK mitigation, lets you score how well you've implemented it (0–5), and shows the D3FEND sub-mitigations plus NIST 800-53 / ISM controls behind it. This is separate from detection — a technique with no detection strategy can still be well-mitigated, which shows up as a 'Mitigated gap' back on tab 6. No published crosswalk to ISM exists, so add your own on tab 1 if you need it." },
 ];
 let tutorialStep = 0;
 $("#startTutorial")?.addEventListener("click", () => {

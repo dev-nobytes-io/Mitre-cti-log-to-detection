@@ -40,3 +40,18 @@ log_sources:
 
   # File telemetry — feeds DET0003 fragments and several legacy detections.
   - { name: sysmon,           channel: "11",        score: 3, comment: "File Creation" }
+
+# Preventive-control maturity (ATT&CK mitigations), independent of the
+# detective log-source scoring above. Scored 0-5 like everything else;
+# unlisted mitigations are treated as "not yet assessed." Mixed on purpose
+# so the sample assessment shows the full range: well-implemented, weak,
+# and (M1017 -> T1566 Phishing, which has no detection strategy in the
+# offline bundle at all) a mitigation covering an otherwise-undetectable
+# technique — see the "Mitigated gaps" stat on the Coverage tab.
+mitigation_scores:
+  M1032: { score: 4, comment: "Okta MFA org-wide" }
+  M1026: { score: 3, comment: "PAM rollout in progress for domain admins" }
+  M1018: { score: 2, comment: "Partial — service accounts still over-privileged" }
+  M1053: { score: 5, comment: "Immutable, air-gapped backups; tested quarterly" }
+  M1017: { score: 1, comment: "Annual phishing training only, no simulation program" }
+  M1031: { score: 3, comment: "NGFW + IDS at egress; no full-take" }
