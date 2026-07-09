@@ -707,3 +707,80 @@ test("Mitigations tab: scoring a mitigation persists and survives reload", async
 
   await page.context().close();
 });
+
+test("Manual mapping editor (tab 1): add a custom mitigation + ISM mapping, verify it surfaces on Mitigations and Coverage tabs, and survives reload", async () => {
+  // There is no published ATT&CK/D3FEND -> ISM mapping anywhere, so ISM
+  // entries can only ever come from this manual editor. Also exercises
+  // adding a brand-new mitigation (not in the loaded bundle) and wiring
+  // it to a real technique via `mitigates`.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+  await activateTab(page, "setup");
+  await page.click("#customMappingForm summary");
+  await page.waitForTimeout(150);
+
+  await page.fill("#customMitName", "Air-gapped backup vault");
+  await page.fill("#customMitDescription", "Offline immutable backups");
+  await page.click("#customMitAdd");
+  await page.waitForTimeout(200);
+
+  const selectByText = async (selector, text) => page.evaluate(([sel, t]) => {
+    const el = document.querySelector(sel);
+    const opt = Array.from(el.options).find(o => o.textContent.includes(t));
+    if (!opt) throw new Error(`No option matching "${t}" in ${sel}`);
+    el.value = opt.value;
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }, [selector, text]);
+
+  // Custom mitigation -> mitigates -> T1486 (a real technique).
+  await selectByText("#customRelSource", "Air-gapped backup vault");
+  await selectByText("#customRelType", "Mitigates a technique");
+  await page.waitForTimeout(100);
+  await selectByText("#customRelTargetTech", "T1486");
+  await page.click("#customRelAdd");
+  await page.waitForTimeout(200);
+
+  // Real mitigation M1032 -> maps-to-ism -> a made-up ISM control.
+  await selectByText("#customRelSource", "M1032");
+  await selectByText("#customRelType", "Maps to an ISM");
+  await page.waitForTimeout(100);
+  await page.fill("#customRelTargetId", "ISM-0974");
+  await page.fill("#customRelTargetLabel", "Multi-factor authentication");
+  await page.click("#customRelAdd");
+  await page.waitForTimeout(200);
+
+  const listText = await page.locator("#customMappingList").innerText();
+  assert.match(listText, /Air-gapped backup vault/, "custom mitigation should be listed");
+  assert.match(listText, /ISM-0974/, "custom ISM mapping should be listed");
+
+  // Coverage tab: T1486 now has 3 mitigations (2 official + the custom one).
+  await activateTab(page, "coverage");
+  await page.selectOption("#coverageFilter", "uncovered");
+  await page.fill("#techFilter", "T1486");
+  await page.waitForTimeout(150);
+  const t1486Row = await page.locator('.tech-row:has-text("T1486")').first().innerText();
+  assert.match(t1486Row, /3 mitigations/, `expected T1486 to show 3 mitigations after the custom mapping, got: ${t1486Row}`);
+
+  // Mitigations tab: M1032 shows the custom ISM chip, tagged "custom".
+  await activateTab(page, "mitigations");
+  await page.fill("#mitigationFilter", "M1032");
+  await page.waitForTimeout(150);
+  await page.click('[data-mit-row-toggle="M1032"]');
+  await page.waitForTimeout(150);
+  const m1032Text = await page.locator("#mitigationTable").innerText();
+  assert.match(m1032Text, /ISM ISM-0974/, `expected M1032's detail to show the custom ISM mapping, got: ${m1032Text}`);
+  assert.match(m1032Text, /custom/, "the custom ISM entry should be tagged 'custom'");
+
+  // Survives a reload.
+  await page.reload();
+  await page.waitForSelector("#statusText");
+  await page.waitForTimeout(1200);
+  await activateTab(page, "coverage");
+  await page.selectOption("#coverageFilter", "uncovered");
+  await page.fill("#techFilter", "T1486");
+  await page.waitForTimeout(150);
+  const t1486AfterReload = await page.locator('.tech-row:has-text("T1486")').first().innerText();
+  assert.match(t1486AfterReload, /3 mitigations/, `expected the custom mapping to survive a reload, got: ${t1486AfterReload}`);
+
+  await page.context().close();
+});

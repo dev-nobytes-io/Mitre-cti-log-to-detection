@@ -291,6 +291,8 @@ async function onAttackLoaded(source, opts = {}) {
   populateTacticFilter();
   populateGroupSelectors();
   renderCustomLsComponentPicker(); // chunk 13: needs attack data
+  populateCustomMappingPickers();
+  renderCustomMappingList();
   refreshAll();
   // Only jump to the Inventory tab when the user explicitly triggered the
   // load (Load/Refresh button, STIX upload, sample-assessment CTA). On
@@ -328,6 +330,144 @@ function populateTacticFilter() {
   const sel = $("#tacticFilter");
   sel.innerHTML = `<option value="">All tactics</option>` +
     state.attack.tactics.map(t => `<option value="${escapeAttr(t.shortname)}">${escapeHtml(t.name)}</option>`).join("");
+}
+
+// --- Custom mitigations & mappings (tab 1) ---
+// Manual escape hatch for mitigations MITRE hasn't catalogued and for
+// frameworks with no published ATT&CK crosswalk at all (ISM has none).
+// See js/custom-mappings.js for the data layer this drives.
+function populateCustomMappingPickers() {
+  const srcSel = $("#customRelSource");
+  const techSel = $("#customRelTargetTech");
+  if (!state.attack) {
+    if (srcSel) srcSel.innerHTML = `<option value="">Load ATT&CK data first</option>`;
+    if (techSel) techSel.innerHTML = `<option value="">Load ATT&CK data first</option>`;
+    return;
+  }
+  const mitigations = (state.attack.mitigations || []).slice().sort((a, b) => a.attackId.localeCompare(b.attackId));
+  if (srcSel) {
+    const prev = srcSel.value;
+    srcSel.innerHTML = mitigations.map(m => `<option value="${escapeAttr(m.id)}">${m.custom ? escapeHtml(m.name) + " (custom)" : `${escapeHtml(m.attackId)} — ${escapeHtml(m.name)}`}</option>`).join("");
+    if (mitigations.some(m => m.id === prev)) srcSel.value = prev;
+  }
+  if (techSel) {
+    const prev = techSel.value;
+    const techs = (state.attack.techniques || []).slice().sort((a, b) => a.attackId.localeCompare(b.attackId));
+    techSel.innerHTML = techs.map(t => `<option value="${escapeAttr(t.id)}">${escapeHtml(t.attackId)} — ${escapeHtml(t.name)}</option>`).join("");
+    if (techs.some(t => t.id === prev)) techSel.value = prev;
+  }
+}
+
+$("#customRelType")?.addEventListener("change", () => {
+  const isMitigates = $("#customRelType").value === "mitigates";
+  const techWrap = $("#customRelTargetTechWrap");
+  const textWrap = $("#customRelTargetTextWrap");
+  if (techWrap) techWrap.hidden = !isMitigates;
+  if (textWrap) textWrap.hidden = isMitigates;
+});
+
+$("#customMitAdd")?.addEventListener("click", () => {
+  const name = ($("#customMitName")?.value || "").trim();
+  const description = ($("#customMitDescription")?.value || "").trim();
+  if (!name) { setStatus("Give the custom mitigation a name", "error"); return; }
+  addCustomMitigation(state.inventory, { name, description });
+  saveInventory(state.inventory);
+  if ($("#customMitName")) $("#customMitName").value = "";
+  if ($("#customMitDescription")) $("#customMitDescription").value = "";
+  if (state.attack) applyCustomMappings(state.attack);
+  populateCustomMappingPickers();
+  renderCustomMappingList();
+  refreshAll();
+  setStatus(`Added custom mitigation "${name}"`, "ok");
+});
+
+$("#customRelAdd")?.addEventListener("click", () => {
+  if (!state.attack) { setStatus("Load ATT&CK data first", "error"); return; }
+  const sourceRef = $("#customRelSource")?.value || "";
+  const relation = $("#customRelType")?.value || "";
+  const comment = ($("#customRelComment")?.value || "").trim();
+  if (!sourceRef) { setStatus("Pick a source mitigation first — add one above if the list is empty", "error"); return; }
+  let targetRef = "", targetLabel = "";
+  if (relation === "mitigates") {
+    targetRef = $("#customRelTargetTech")?.value || "";
+    const tech = state.attack.techniqueById?.get(targetRef);
+    targetLabel = tech?.attackId || "";
+    if (!targetRef) { setStatus("Pick a target technique", "error"); return; }
+  } else {
+    targetRef = ($("#customRelTargetId")?.value || "").trim();
+    targetLabel = ($("#customRelTargetLabel")?.value || "").trim();
+    if (!targetRef) { setStatus("Give the target a control ID", "error"); return; }
+  }
+  addCustomRelation(state.inventory, { sourceRef, relation, targetRef, targetLabel, comment });
+  saveInventory(state.inventory);
+  if ($("#customRelTargetId")) $("#customRelTargetId").value = "";
+  if ($("#customRelTargetLabel")) $("#customRelTargetLabel").value = "";
+  if ($("#customRelComment")) $("#customRelComment").value = "";
+  applyCustomMappings(state.attack);
+  populateCustomMappingPickers();
+  renderCustomMappingList();
+  refreshAll();
+  setStatus("Added custom mapping", "ok");
+});
+
+function renderCustomMappingList() {
+  const root = $("#customMappingList");
+  if (!root) return;
+  const objects = state.inventory.custom_objects || [];
+  const relations = state.inventory.custom_relations || [];
+  if (objects.length === 0 && relations.length === 0) {
+    root.innerHTML = `<div style="padding:12px;color:var(--muted)">No custom mitigations or mappings yet.</div>`;
+    return;
+  }
+  const relationLabel = id => RELATION_TYPES.find(r => r.id === id)?.label || id;
+  const sourceLabel = ref => {
+    const m = state.attack?.mitigationById?.get(ref);
+    if (!m) return ref;
+    return m.custom ? m.name : `${m.attackId} — ${m.name}`;
+  };
+  let html = "";
+  if (objects.length) {
+    html += `<div class="ds-row" style="background:var(--surface-2,#fafafa);font-weight:600"><div></div><div>Custom mitigations</div><div></div><div></div></div>`;
+    for (const o of objects) {
+      html += `<div class="dc-row by-name-row" data-custom-object="${escapeAttr(o.id)}">
+        <div><div class="dc-name">${escapeHtml(o.name)}</div><div class="dc-meta">${escapeHtml(o.description || "no description")}</div></div>
+        <div></div>
+        <div><button class="danger" data-remove-custom-object="${escapeAttr(o.id)}" title="Remove">×</button></div>
+      </div>`;
+    }
+  }
+  if (relations.length) {
+    html += `<div class="ds-row" style="background:var(--surface-2,#fafafa);font-weight:600"><div></div><div>Custom mappings</div><div></div><div></div></div>`;
+    for (const r of relations) {
+      const target = r.relation === "mitigates" ? (state.attack?.techniqueById?.get(r.targetRef)?.attackId || r.targetLabel || r.targetRef) : `${r.targetRef}${r.targetLabel ? ` (${r.targetLabel})` : ""}`;
+      html += `<div class="dc-row by-name-row" data-custom-relation="${escapeAttr(r.id)}">
+        <div><div class="dc-name">${escapeHtml(sourceLabel(r.sourceRef))} <span style="color:var(--muted)">${escapeHtml(relationLabel(r.relation))}</span> ${escapeHtml(target)}</div><div class="dc-meta">${escapeHtml(r.comment || "no comment")}</div></div>
+        <div></div>
+        <div><button class="danger" data-remove-custom-relation="${escapeAttr(r.id)}" title="Remove">×</button></div>
+      </div>`;
+    }
+  }
+  root.innerHTML = html;
+  root.querySelectorAll("[data-remove-custom-object]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      removeCustomObject(state.inventory, btn.getAttribute("data-remove-custom-object"));
+      saveInventory(state.inventory);
+      if (state.attack) applyCustomMappings(state.attack);
+      populateCustomMappingPickers();
+      renderCustomMappingList();
+      refreshAll();
+    });
+  });
+  root.querySelectorAll("[data-remove-custom-relation]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      removeCustomRelation(state.inventory, btn.getAttribute("data-remove-custom-relation"));
+      saveInventory(state.inventory);
+      if (state.attack) applyCustomMappings(state.attack);
+      populateCustomMappingPickers();
+      renderCustomMappingList();
+      refreshAll();
+    });
+  });
 }
 
 // --- Inventory tab ---
@@ -1666,18 +1806,37 @@ function renderStrategyExpansion(strat, analyticDetail, detectedTechIds) {
 // consistent. No new CSS — reuses .strat-ls-list/.strat-ls-row (nested
 // bullet rows) and .strat-tech-chip (pill chips).
 function renderD3fendList(m) {
-  if (!(m.d3fend || []).length) {
-    return `<div class="comp-meta" style="padding-left:18px">${escapeHtml(m.d3fendComment || "No D3FEND sub-mitigation mapped for this ATT&CK mitigation.")}</div>`;
-  }
-  return `<div class="strat-ls-list">${m.d3fend.map(d => `
-    <div class="strat-ls-row${(d.nist || []).length ? " ls-on" : " ls-off"}">
-      <span class="dot"></span>
-      <strong title="${escapeAttr(d.definition)}">${escapeHtml(d.id)} ${escapeHtml(d.name)}</strong>
-      ${(d.nist || []).length
-        ? `<span style="display:inline-flex;gap:4px;flex-wrap:wrap;margin-left:6px">${d.nist.map(n => `<span class="strat-tech-chip" title="NIST SP 800-53 Rev 5">NIST ${escapeHtml(n)}</span>`).join("")}</span>`
-        : `<span style="color:var(--muted);font-size:11px;margin-left:6px">no NIST 800-53 control mapped</span>`}
-    </div>`).join("")}
-  </div>`;
+  const official = (m.d3fend || []).length
+    ? `<div class="strat-ls-list">${m.d3fend.map(d => `
+      <div class="strat-ls-row${(d.nist || []).length ? " ls-on" : " ls-off"}">
+        <span class="dot"></span>
+        <strong title="${escapeAttr(d.definition)}">${escapeHtml(d.id)} ${escapeHtml(d.name)}</strong>
+        ${(d.nist || []).length
+          ? `<span style="display:inline-flex;gap:4px;flex-wrap:wrap;margin-left:6px">${d.nist.map(n => `<span class="strat-tech-chip" title="NIST SP 800-53 Rev 5">NIST ${escapeHtml(n)}</span>`).join("")}</span>`
+          : `<span style="color:var(--muted);font-size:11px;margin-left:6px">no NIST 800-53 control mapped</span>`}
+      </div>`).join("")}
+    </div>`
+    : `<div class="comp-meta" style="padding-left:18px">${escapeHtml(m.d3fendComment || "No D3FEND sub-mitigation mapped for this ATT&CK mitigation.")}</div>`;
+
+  // Custom D3FEND/NIST/ISM entries entered on tab 1 (js/custom-mappings.js).
+  // No official ATT&CK/D3FEND -> ISM crosswalk exists, so ISM only ever
+  // shows up here.
+  const customRows = [
+    ...(m.customD3fend || []).map(d => ({ kind: "D3FEND", ...d })),
+    ...(m.customNist || []).map(d => ({ kind: "NIST", ...d })),
+    ...(m.customIsm || []).map(d => ({ kind: "ISM", ...d })),
+  ];
+  const custom = customRows.length
+    ? `<div class="strat-ls-list">${customRows.map(d => `
+      <div class="strat-ls-row ls-on">
+        <span class="dot"></span>
+        <strong>${escapeHtml(d.kind)} ${escapeHtml(d.id)}</strong>
+        ${d.name ? `<span style="color:var(--muted);margin-left:6px">${escapeHtml(d.name)}</span>` : ""}
+        <span class="strat-tech-chip more" style="margin-left:6px">custom</span>
+      </div>`).join("")}
+    </div>`
+    : "";
+  return official + custom;
 }
 
 function renderMitigationExpansion(mitigationIds) {
@@ -1693,7 +1852,7 @@ function renderMitigationExpansion(mitigationIds) {
       <div class="strat-an-h">
         <span class="dot"></span>
         <strong>${escapeHtml(m.name)}</strong>
-        <span style="color:var(--muted);font-size:11px;margin-left:6px">${escapeHtml(m.attackId)}</span>
+        <span style="color:var(--muted);font-size:11px;margin-left:6px">${m.custom ? "custom" : escapeHtml(m.attackId)}</span>
         <span style="color:var(--muted);font-size:11px;margin-left:auto">${score > 0 ? `maturity ${score}/5` : "not assessed"}</span>
       </div>
       ${renderD3fendList(m)}
@@ -2048,7 +2207,7 @@ function renderMitigations() {
       <div class="ds-row" data-mit-id="${escapeAttr(m.attackId)}">
         <div class="toggle" data-mit-row-toggle="${escapeAttr(m.attackId)}" style="cursor:pointer;color:var(--muted)">${expanded ? "▾" : "▸"}</div>
         <div>
-          <div class="ds-name">${escapeHtml(m.name)} <span style="color:var(--muted);font-weight:400">${escapeHtml(m.attackId)}</span></div>
+          <div class="ds-name">${escapeHtml(m.name)} <span style="color:var(--muted);font-weight:400">${m.custom ? "custom" : escapeHtml(m.attackId)}</span></div>
           <div class="ds-meta">${techCount} technique${techCount === 1 ? "" : "s"} · ${d3Count} D3FEND sub-mitigation${d3Count === 1 ? "" : "s"}</div>
         </div>
         <div class="ds-meta">${score > 0 ? `score ${score}` : "not assessed"}</div>
