@@ -255,9 +255,10 @@
             <li>Pick the <strong>Analytic score</strong> aggregator: <em>min</em> = strict (a chain is only as strong as its weakest log source); <em>avg</em> = lenient.</li>
             <li>Scroll to the technique table — score / coverage ratio / lit/partial badges per technique. Filter by tactic or coverage class.</li>
             <li>Click <strong>✓</strong> on any technique row to mark it <em>risk accepted</em> (acknowledged gap). It moves out of <em>Uncovered</em> and into the <em>Risk accepted</em> bucket.</li>
+            <li>A row with linked ATT&amp;CK mitigations shows a <strong>"N mitigations"</strong> toggle and a 🛡 preventive-control score badge next to the detective score badge — expand it to see each mitigation's D3FEND sub-mitigations and NIST 800-53 controls. This is additive: it doesn't change the detective status/score, just adds the preventive-control picture alongside it. Score mitigations on the Mitigations tab.</li>
             <li>Use <em>Download detections Navigator layer</em> to export a heatmap.</li>
           </ol>
-          <p><strong>Capabilities:</strong> tactic + coverage filters, min/avg aggregator toggle, per-strategy park / claim-coverage toggles, per-technique risk-accept toggle, Navigator layer export.</p>
+          <p><strong>Capabilities:</strong> tactic + coverage filters, min/avg aggregator toggle, per-strategy park / claim-coverage toggles, per-technique risk-accept toggle, Navigator layer export, per-technique mitigation/D3FEND/NIST breakdown.</p>
         </div>
       </details>
       <div class="stats" id="coverageStats"></div>
@@ -359,18 +360,18 @@
 
     <section class="panel" id="tab-mitigations" role="tabpanel">
       <h2>Mitigations</h2>
-      <p>Preventive controls (ATT&amp;CK mitigations) and the D3FEND sub-mitigations that implement them. Score how mature each control is in your environment — separate from the detective coverage on tab 4.</p>
+      <p>Preventive controls (ATT&amp;CK mitigations), the D3FEND sub-mitigations that implement them, and the NIST SP 800-53 controls D3FEND maps those to. Score how mature each control is in your environment — separate from the detective coverage on tab 4.</p>
       <details class="tab-help">
         <summary>📖 How to use this tab</summary>
         <div class="tab-help-body">
-          <p><strong>What it does:</strong> lists every ATT&amp;CK mitigation (<code>course-of-action</code>) in the loaded bundle, the techniques it applies to, and the D3FEND defensive techniques D3FEND documents as implementing it (a "sub-mitigation" — more specific than the ATT&amp;CK mitigation). This is a <em>preventive</em>-control dimension, distinct from the <em>detective</em> Log Source → Analytic → Strategy chain scored on tabs 2 and 4.</p>
+          <p><strong>What it does:</strong> lists every ATT&amp;CK mitigation (<code>course-of-action</code>) in the loaded bundle, the techniques it applies to, the D3FEND defensive techniques D3FEND documents as implementing it (a "sub-mitigation" — more specific than the ATT&amp;CK mitigation), and the NIST SP 800-53 Rev 5 controls D3FEND maps each of those to. This is a <em>preventive</em>-control dimension, distinct from the <em>detective</em> Log Source → Analytic → Strategy chain scored on tabs 2 and 4.</p>
           <p><strong>Steps:</strong></p>
           <ol>
             <li>Set a 0-5 maturity score per mitigation — how well is this control actually implemented in your environment? 0 = not implemented, 5 = excellent.</li>
-            <li>Expand a row to see its D3FEND sub-mitigations and which techniques it applies to.</li>
+            <li>Expand a row to see its D3FEND sub-mitigations (each with any NIST 800-53 controls D3FEND maps it to) and which techniques it applies to.</li>
             <li>Filter by name/ID, or toggle "only scored" to review what you've already assessed.</li>
           </ol>
-          <p><strong>Capabilities:</strong> name/ID filter, only-scored toggle, per-mitigation 0-5 score. Scores persist with the rest of your inventory (YAML/JSON export on tab 2) and feed into the Coverage tab's per-technique picture.</p>
+          <p><strong>Capabilities:</strong> name/ID filter, only-scored toggle, per-mitigation 0-5 score. Scores persist with the rest of your inventory (YAML/JSON export on tab 2) and feed into the Coverage tab's per-technique picture. NIST controls come from D3FEND's own D3FEND-to-NIST-800-53 crosswalk, not every D3FEND technique has one.</p>
         </div>
       </details>
       <div class="stats" id="mitigationStats"></div>

@@ -1647,6 +1647,27 @@ function renderStrategyExpansion(strat, analyticDetail, detectedTechIds) {
 // Mitigations D3FEND hasn't mapped yet render their `d3fendComment`
 // (D3FEND's own explanation, e.g. "outside the scope of D3FEND") instead
 // of an empty list.
+// Renders a mitigation's D3FEND sub-mitigations, each with its nested
+// NIST 800-53 control chips (D3FEND's own D3FEND -> NIST crosswalk).
+// Shared by the Coverage tab's per-technique expansion and the
+// Mitigations tab's per-mitigation detail so the two stay visually
+// consistent. No new CSS — reuses .strat-ls-list/.strat-ls-row (nested
+// bullet rows) and .strat-tech-chip (pill chips).
+function renderD3fendList(m) {
+  if (!(m.d3fend || []).length) {
+    return `<div class="comp-meta" style="padding-left:18px">${escapeHtml(m.d3fendComment || "No D3FEND sub-mitigation mapped for this ATT&CK mitigation.")}</div>`;
+  }
+  return `<div class="strat-ls-list">${m.d3fend.map(d => `
+    <div class="strat-ls-row${(d.nist || []).length ? " ls-on" : " ls-off"}">
+      <span class="dot"></span>
+      <strong title="${escapeAttr(d.definition)}">${escapeHtml(d.id)} ${escapeHtml(d.name)}</strong>
+      ${(d.nist || []).length
+        ? `<span style="display:inline-flex;gap:4px;flex-wrap:wrap;margin-left:6px">${d.nist.map(n => `<span class="strat-tech-chip" title="NIST SP 800-53 Rev 5">NIST ${escapeHtml(n)}</span>`).join("")}</span>`
+        : `<span style="color:var(--muted);font-size:11px;margin-left:6px">no NIST 800-53 control mapped</span>`}
+    </div>`).join("")}
+  </div>`;
+}
+
 function renderMitigationExpansion(mitigationIds) {
   const mitigationScores = effectiveMitigationScores(state.inventory);
   const mitigations = mitigationIds
@@ -1663,14 +1684,12 @@ function renderMitigationExpansion(mitigationIds) {
         <span style="color:var(--muted);font-size:11px;margin-left:6px">${escapeHtml(m.attackId)}</span>
         <span style="color:var(--muted);font-size:11px;margin-left:auto">${score > 0 ? `maturity ${score}/5` : "not assessed"}</span>
       </div>
-      ${(m.d3fend || []).length
-        ? `<div class="strat-tech-list" style="padding-left:18px">${m.d3fend.map(d => `<span class="strat-tech-chip" title="${escapeAttr(d.definition)}">${escapeHtml(d.id)} ${escapeHtml(d.name)}</span>`).join("")}</div>`
-        : `<div class="comp-meta" style="padding-left:18px">${escapeHtml(m.d3fendComment || "No D3FEND sub-mitigation mapped for this ATT&CK mitigation.")}</div>`}
+      ${renderD3fendList(m)}
     </div>`;
   }).join("");
   return `<div class="comp-expansion mit-expansion" style="grid-template-columns:1fr">
     <div class="comp-section">
-      <div class="comp-section-h">Mitigations (ATT&amp;CK) &amp; D3FEND sub-mitigations</div>
+      <div class="comp-section-h">Mitigations (ATT&amp;CK), D3FEND sub-mitigations &amp; NIST 800-53 controls</div>
       ${blocks || `<div class="comp-meta">No mitigations linked.</div>`}
       <p class="comp-meta" style="margin-top:8px">Score maturity on the <a href="#" data-goto="mitigations">Mitigations tab</a>.</p>
     </div>
@@ -1983,12 +2002,14 @@ function renderMitigations() {
     ? mitigations.reduce((s, m) => s + (scores.get(m.attackId)?.score || 0), 0) / scoredCount
     : 0;
   const d3fendCount = mitigations.reduce((n, m) => n + (m.d3fend?.length || 0), 0);
+  const nistCount = mitigations.reduce((n, m) => n + (m.d3fend || []).reduce((n2, d) => n2 + (d.nist?.length || 0), 0), 0);
   if (stats) {
     stats.innerHTML = `
       <div class="stat-card"><div class="label">Mitigations</div><div class="value">${mitigations.length}</div></div>
       <div class="stat-card"><div class="label">Scored</div><div class="value">${scoredCount}</div><div class="sub">${pct(scoredCount / Math.max(mitigations.length, 1))} assessed</div></div>
       <div class="stat-card"><div class="label">Avg maturity</div><div class="value">${avgScore.toFixed(2)}</div><div class="sub">of scored</div></div>
       <div class="stat-card"><div class="label">D3FEND sub-mitigations</div><div class="value">${d3fendCount}</div></div>
+      <div class="stat-card"><div class="label">NIST 800-53 controls</div><div class="value">${nistCount}</div><div class="sub">via D3FEND crosswalk</div></div>
     `;
   }
 
@@ -2052,17 +2073,14 @@ function renderMitigationDetail(m) {
   const techHtml = techs.length
     ? `<div class="strat-tech-list">${techs.slice(0, 20).map(t => `<span class="strat-tech-chip">${escapeHtml(t.attackId)} <span style="color:var(--muted)">${escapeHtml(t.name || "")}</span></span>`).join("")}${techs.length > 20 ? `<span class="strat-tech-chip more">+${techs.length - 20} more</span>` : ""}</div>`
     : `<div class="comp-meta">No linked techniques.</div>`;
-  const d3Html = (m.d3fend || []).length
-    ? `<div class="strat-tech-list">${m.d3fend.map(d => `<span class="strat-tech-chip" title="${escapeAttr(d.definition)}">${escapeHtml(d.id)} ${escapeHtml(d.name)}</span>`).join("")}</div>`
-    : `<div class="comp-meta">${escapeHtml(m.d3fendComment || "No D3FEND sub-mitigation mapped for this ATT&CK mitigation.")}</div>`;
   return `<div class="comp-expansion">
     <div class="comp-section">
       <div class="comp-section-h">Techniques this mitigation applies to</div>
       ${techHtml}
     </div>
     <div class="comp-section">
-      <div class="comp-section-h">D3FEND sub-mitigations</div>
-      ${d3Html}
+      <div class="comp-section-h">D3FEND sub-mitigations &amp; NIST 800-53 controls</div>
+      ${renderD3fendList(m)}
     </div>
   </div>`;
 }
