@@ -3,10 +3,14 @@
 // that maps an ATT&CK mitigation id (e.g. M1032) to the D3FEND defensive
 // techniques D3FEND documents as implementing it (e.g. D3-MFA). D3FEND
 // models these as more specific than the ATT&CK mitigation they hang off
-// of, so this app surfaces them as "sub-mitigations".
+// of, so this app surfaces them as "sub-mitigations". Each D3FEND
+// sub-mitigation also carries D3FEND's own D3FEND -> NIST SP 800-53 Rev 5
+// control mapping, chaining ATT&CK -> D3FEND -> NIST in one hop. There is
+// no published D3FEND/ATT&CK -> ISM mapping, so ISM entries only ever come
+// from the manual mapping editor (js/custom-mappings.js).
 //
 // Exposes:
-//   loadD3fendMitigations() -> Map<attackId, { attackId, name, comment, d3fend: [{id, name, definition}] }>
+//   loadD3fendMitigations() -> Map<attackId, { attackId, name, comment, d3fend: [{id, name, definition, nist: [controlId, ...]}] }>
 //   attachD3fend(attack, d3fendByAttackId) -> mutates attack.mitigationById entries in place, adding `.d3fend`
 
 const D3FEND_BUNDLE_URL = "vendor/d3fend-mitigations.json";

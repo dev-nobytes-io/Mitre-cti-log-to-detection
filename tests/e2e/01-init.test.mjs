@@ -172,17 +172,23 @@ test("D3FEND sub-mitigation mappings load and attach onto ATT&CK mitigations", a
     d3fendMod.attachD3fend(a, d3fendByAttackId);
     const m1032 = a.mitigationByAttackId.get("M1032");
     const m1053 = a.mitigationByAttackId.get("M1053"); // Data Backup — real D3FEND mapping has no sub-techniques
+    const mfa = (m1032?.d3fend || []).find(d => d.id === "D3-MFA");
     return {
       d3fendMitigationCount: d3fendByAttackId.size,
       m1032D3fend: (m1032?.d3fend || []).map(d => d.id),
       m1053D3fend: m1053?.d3fend || [],
       everyMitigationHasD3fendArray: a.mitigations.every(m => Array.isArray(m.d3fend)),
+      everyD3fendEntryHasNistArray: a.mitigations.every(m => (m.d3fend || []).every(d => Array.isArray(d.nist))),
+      mfaNist: mfa?.nist || [],
     };
   });
   assert.ok(direct.d3fendMitigationCount >= 40, `expected ~42 D3FEND mitigation entries, got ${direct.d3fendMitigationCount}`);
   assert.ok(direct.m1032D3fend.includes("D3-MFA"), `expected M1032 to map to D3-MFA, got ${direct.m1032D3fend}`);
   assert.deepEqual(direct.m1053D3fend, [], "M1053 (Data Backup) has no D3FEND sub-mitigations upstream");
   assert.ok(direct.everyMitigationHasD3fendArray, "every mitigation should have a d3fend array, even if empty");
+  assert.ok(direct.everyD3fendEntryHasNistArray, "every D3FEND sub-mitigation should have a nist array, even if empty");
+  assert.ok(direct.mfaNist.length > 0, `expected D3-MFA to map to at least one NIST 800-53 control, got ${JSON.stringify(direct.mfaNist)}`);
+  assert.ok(direct.mfaNist.some(c => c.startsWith("IA-2") || c.startsWith("AC-2")), `expected D3-MFA's NIST controls to include an IA-2/AC-2 family control, got ${JSON.stringify(direct.mfaNist)}`);
   await page.context().close();
 });
 

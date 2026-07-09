@@ -96,9 +96,10 @@ test("Coverage tab: mitigations expand into ATT&CK mitigations + D3FEND sub-miti
   await page.waitForTimeout(150);
 
   const text = await page.locator("#techniqueTable").innerText();
-  assert.match(text, /Mitigations \(ATT&CK\) & D3FEND sub-mitigations/, "expected the mitigations expansion header");
+  assert.match(text, /Mitigations \(ATT&CK\).*D3FEND sub-mitigations.*NIST 800-53/, "expected the mitigations expansion header");
   assert.match(text, /Multi-factor Authentication/, "expected T1078's M1032 mitigation to be listed");
   assert.match(text, /D3-MFA/, "expected M1032's D3FEND sub-mitigation (D3-MFA) to be listed");
+  assert.match(text, /NIST (AC-2\(1\)|IA-2)/, "expected D3-MFA's NIST 800-53 control(s) to be listed");
 
   // A mitigation D3FEND hasn't mapped yet (M1053 Data Backup, on
   // T1486/T1490/T1485) should render D3FEND's own comment instead of an
