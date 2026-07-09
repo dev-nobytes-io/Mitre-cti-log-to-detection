@@ -2120,6 +2120,7 @@ function renderGapAnalysis() {
     <div class="stat-card"><div class="label">Gaps</div><div class="value" style="color:var(--bad)">${gap.summary.gaps}</div><div class="sub">no coverage</div></div>
     <div class="stat-card"><div class="label">Undetectable</div><div class="value" style="color:var(--warn)">${gap.summary.undetectable}</div><div class="sub">no detections defined</div></div>
     <div class="stat-card"><div class="label">Risk accepted</div><div class="value">${gap.summary.riskAccepted || 0}</div><div class="sub">acknowledged gaps</div></div>
+    <div class="stat-card"><div class="label">Mitigated gaps</div><div class="value">${gap.summary.mitigatedGaps || 0}</div><div class="sub">of the gaps/undetectable above, a scored mitigation applies</div></div>
   `;
 
   const fStatus = state.filters.threatStatus;
@@ -2129,10 +2130,13 @@ function renderGapAnalysis() {
   for (const r of rows.slice(0, 1500)) {
     const tech = r.tech;
     const groupBadge = `<span style="color:var(--muted);font-size:11px"> · ${r.groupCount} group${r.groupCount === 1 ? "" : "s"}</span>`;
+    const mitBadge = r.mitigatedGap
+      ? ` <span class="cov-tag" title="A scored mitigation applies even though detection doesn't">🛡 mitigated ${r.mitigationScore}/5</span>`
+      : (r.mitigationIds.length ? ` <span style="color:var(--muted);font-size:11px">🛡${r.mitigationScore}</span>` : "");
     html += `
       <div class="tech-row" title="${escapeAttr(`Used by ${r.groups.map(g => g.attackId).join(", ")}`)}">
         <div class="tech-id">${escapeHtml(tech.attackId)}</div>
-        <div>${escapeHtml(tech.name)}${groupBadge}</div>
+        <div>${escapeHtml(tech.name)}${groupBadge}${mitBadge}</div>
         <div class="tech-tactics">${escapeHtml(tech.tactics.join(", "))}</div>
         <div><span class="score-badge ${statusClass(r.status)}">${escapeHtml(statusLabel(r.status))}</span></div>
         <div><span class="score-badge s${Math.round(r.weightedScore)}">${r.weightedScore.toFixed(2)}</span></div>

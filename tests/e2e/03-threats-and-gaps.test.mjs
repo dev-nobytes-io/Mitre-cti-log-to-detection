@@ -238,3 +238,40 @@ test("gap analysis populates when both inventory and threats are imported", asyn
 
   await page.context().close();
 });
+
+test("gap analysis: a scored mitigation reframes a gap/undetectable row as 'mitigated' without changing its status", async () => {
+  // T1566 (Phishing) has no detection strategy in the offline bundle at
+  // all (status: undetectable) but is mitigated by M1017 (User Training).
+  // Scoring M1017 should surface a mitigation badge on T1566's row and
+  // bump the "Mitigated gaps" stat, without moving T1566 out of the
+  // undetectable bucket — this is additive context, not a reclassification.
+  const page = await newPage({ blockExternal: true });
+  await bootApp(page);
+
+  await activateTab(page, "mitigations");
+  await page.fill("#mitigationFilter", "M1017");
+  await page.waitForTimeout(150);
+  await page.selectOption('select[data-kind="mitigation"][data-key="M1017"]', "3");
+  await page.waitForTimeout(150);
+
+  await activateTab(page, "threats");
+  await page.fill("#groupFilter", "APT29");
+  await page.waitForTimeout(200);
+  await page.evaluate(() => {
+    const row = Array.from(document.querySelectorAll("#groupList .group-row")).find(r => r.textContent.includes("APT29"));
+    const box = row?.querySelector("input[type=checkbox]");
+    if (box) { box.checked = true; box.dispatchEvent(new Event("change", { bubbles: true })); }
+  });
+  await page.waitForTimeout(200);
+
+  await activateTab(page, "gaps");
+  await page.waitForTimeout(300);
+  const stats = await readStats(page, "#threatStats");
+  assert.ok(Number(stats["Mitigated gaps"]) >= 1, `expected >= 1 mitigated gap, got: ${JSON.stringify(stats)}`);
+
+  const t1566Row = await page.locator('#threatTable .tech-row:has-text("T1566")').first().innerText();
+  assert.match(t1566Row, /mitigated 3\/5/, `expected T1566's row to show the mitigation badge, got: ${t1566Row}`);
+  assert.match(t1566Row, /no-detect/, "T1566 should stay in the undetectable bucket, not be reclassified");
+
+  await page.context().close();
+});
